@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "src/flash_user.c"
+    INCLUDE_DIRS
+        "inc"
+    REQUIRES
+        esp_common
+    PRIV_REQUIRES
+        BSP
+        fatfs
+        freertos
+        log
+        nvs_flash
+        spiffs
+        wear_levelling
+)

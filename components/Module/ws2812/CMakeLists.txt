@@ -1,0 +1,9 @@
+idf_component_register(
+    SRCS
+        "src/ws2812.c"
+    INCLUDE_DIRS
+        "inc"
+    PRIV_REQUIRES
+        BSP
+        freertos
+)

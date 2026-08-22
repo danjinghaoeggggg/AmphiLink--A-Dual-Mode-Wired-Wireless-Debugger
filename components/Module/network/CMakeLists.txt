@@ -1,0 +1,14 @@
+idf_component_register(
+    SRCS
+        "src/network_tcp_server.c"
+        "src/network_udp_broadcaster.c"
+        "src/wifi_manager.c"
+    INCLUDE_DIRS
+        "inc"
+    REQUIRES
+        esp_event
+        esp_netif
+        esp_wifi
+        freertos
+        lwip
+)

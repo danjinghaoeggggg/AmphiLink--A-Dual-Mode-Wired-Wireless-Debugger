@@ -1,0 +1,32 @@
+idf_component_register(
+    SRCS
+        "src/amphilink.c"
+        "core/src/dap_core_service.c"
+        "tcp/src/dap_tcp_protocol.c"
+        "tcp/src/device_identity_store.c"
+        "tcp/src/provisioning_server.c"
+        "tcp/src/tcp_transport.c"
+        "tcp/src/wifi_profile_store.c"
+        "transport_manager/src/transport_manager.c"
+        "usb/src/usb_transport.c"
+    INCLUDE_DIRS
+        "inc"
+        "core/inc"
+        "transport_manager/inc"
+    PRIV_INCLUDE_DIRS
+        "tcp/inc"
+        "transport_manager/private"
+        "usb/inc"
+    REQUIRES
+        DAP
+        espressif__cjson
+        esp_http_server
+        esp_hw_support
+        flash
+        freertos
+        network
+        nvs_flash
+        sw3
+        usb
+        ws2812
+)

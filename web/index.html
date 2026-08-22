@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#17322d">
+  <title>AmphiLink Wi-Fi</title>
+  <link rel="stylesheet" href="/app.v6.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><i data-icon="radio"></i></span>
+      <div><strong>AmphiLink</strong><span>Wi-Fi Console</span></div>
+    </div>
+    <div class="language" role="group" aria-label="Language">
+      <button type="button" data-lang="zh">中文</button>
+      <button type="button" data-lang="en">EN</button>
+    </div>
+  </header>
+
+  <section id="login-screen" class="login-screen" aria-labelledby="login-title">
+    <form id="login-form" class="login-panel">
+      <div class="login-heading"><span class="login-mark"><i data-icon="lock"></i></span><div><span class="eyebrow">AmphiLink</span><h1 id="login-title" data-i18n="adminLogin">管理登录</h1></div></div>
+      <label><span data-i18n="adminPassword">管理密码</span><span class="password-input"><input id="login-password" type="password" maxlength="63" autocomplete="current-password" required><button id="login-eye" class="icon-button" type="button" aria-label="Show password"><i data-icon="eye"></i></button></span></label>
+      <button class="command primary login-submit" type="submit" data-i18n="login">登录</button>
+    </form>
+  </section>
+
+  <section class="status-band" aria-live="polite">
+    <div class="status-inner">
+      <div class="status-main">
+        <span id="status-dot" class="status-dot"></span>
+        <div><span class="eyebrow" data-i18n="deviceStatus">设备状态</span><strong id="status-mode">--</strong></div>
+      </div>
+      <dl class="status-facts">
+        <div><dt>SSID</dt><dd id="status-ssid">--</dd></div>
+        <div><dt>IP</dt><dd id="status-ip">--</dd></div>
+        <div><dt data-i18n="debugLink">调试链路</dt><dd id="status-dap">--</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <main>
+    <section class="workspace-section" aria-labelledby="identity-title">
+      <div class="section-heading">
+        <div><span class="section-index">01</span><h1 id="identity-title" data-i18n="deviceIdentity">设备标识</h1></div>
+      </div>
+      <form id="identity-form" class="identity-form">
+        <label class="identity-name"><span data-i18n="deviceName">设备名称</span><input id="identity-name" name="name" maxlength="32" autocomplete="off" required></label>
+        <fieldset class="identity-colors">
+          <legend data-i18n="colorId">颜色编号</legend>
+          <div class="color-options">
+            <label class="color-option" style="--swatch:#ff0000"><input type="radio" name="identity-id" value="1" required><span class="color-swatch"></span><span>1</span></label>
+            <label class="color-option" style="--swatch:#ff5000"><input type="radio" name="identity-id" value="2"><span class="color-swatch"></span><span>2</span></label>
+            <label class="color-option" style="--swatch:#ffdc00"><input type="radio" name="identity-id" value="3"><span class="color-swatch"></span><span>3</span></label>
+            <label class="color-option" style="--swatch:#00d84a"><input type="radio" name="identity-id" value="4"><span class="color-swatch"></span><span>4</span></label>
+            <label class="color-option" style="--swatch:#00cfd1"><input type="radio" name="identity-id" value="5"><span class="color-swatch"></span><span>5</span></label>
+            <label class="color-option" style="--swatch:#1769ff"><input type="radio" name="identity-id" value="6"><span class="color-swatch"></span><span>6</span></label>
+            <label class="color-option" style="--swatch:#8000ff"><input type="radio" name="identity-id" value="7"><span class="color-swatch"></span><span>7</span></label>
+            <label class="color-option" style="--swatch:#df00d7"><input type="radio" name="identity-id" value="8"><span class="color-swatch"></span><span>8</span></label>
+            <label class="color-option" style="--swatch:#ff4080"><input type="radio" name="identity-id" value="9"><span class="color-swatch"></span><span>9</span></label>
+            <label class="color-option light" style="--swatch:#ffffff"><input type="radio" name="identity-id" value="10"><span class="color-swatch"></span><span>10</span></label>
+          </div>
+        </fieldset>
+        <button class="command primary identity-save" type="submit" data-i18n="save">保存</button>
+      </form>
+    </section>
+
+    <section class="workspace-section" aria-labelledby="saved-title">
+      <div class="section-heading">
+        <div><span class="section-index">02</span><h2 id="saved-title" data-i18n="savedNetworks">已保存网络</h2></div>
+        <button id="add-network" class="command primary" type="button"><i data-icon="plus"></i><span data-i18n="addNetwork">添加网络</span></button>
+      </div>
+      <div id="saved-list" class="network-list" role="list"></div>
+    </section>
+
+    <section class="workspace-section scan-section" aria-labelledby="scan-title">
+      <div class="section-heading">
+        <div><span class="section-index">03</span><h2 id="scan-title" data-i18n="nearbyNetworks">附近网络</h2></div>
+        <button id="scan-button" class="command" type="button"><i data-icon="refresh"></i><span data-i18n="scan">搜索</span></button>
+      </div>
+      <div id="scan-empty" class="empty"><i data-icon="radar"></i><span data-i18n="scanPrompt">搜索附近可用的 Wi-Fi</span></div>
+      <div id="scan-list" class="scan-list"></div>
+    </section>
+  </main>
+
+  <footer class="page-footer">
+    <details class="license-disclosure">
+      <summary title="Lucide / ISC License" aria-label="Lucide / ISC License"><i data-icon="info"></i></summary>
+      <div class="license-popover" role="tooltip">
+        <strong>本页面使用 Lucide 图标，其License如下</strong>
+        <pre>ISC License
+
+Copyright (c) 2022, Lucide Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.</pre>
+      </div>
+    </details>
+  </footer>
+
+  <dialog id="profile-dialog">
+    <form id="profile-form" method="dialog">
+      <div class="dialog-heading"><h2 id="profile-title"></h2><button class="icon-button dialog-close" type="button" aria-label="Close"><i data-icon="x"></i></button></div>
+      <label><span>SSID</span><input id="profile-ssid" name="ssid" maxlength="32" autocomplete="off" required></label>
+      <label><span data-i18n="password">密码</span><span class="password-input"><input id="profile-password" name="password" type="password" maxlength="63" autocomplete="new-password"><button id="dialog-eye" class="icon-button" type="button" aria-label="Show password"><i data-icon="eye"></i></button></span></label>
+      <p class="field-note" data-i18n="passwordRule">开放网络留空；加密网络需要 8–63 个字符</p>
+      <div class="dialog-actions"><button class="command" value="cancel" type="button" id="profile-cancel" data-i18n="cancel">取消</button><button class="command primary" type="submit" data-i18n="save">保存</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="connect-dialog">
+    <form id="connect-form" method="dialog">
+      <div class="dialog-heading"><h2 data-i18n="connectNetwork">连接网络</h2><button class="icon-button dialog-close" type="button" aria-label="Close"><i data-icon="x"></i></button></div>
+      <div class="selected-network"><i data-icon="wifi"></i><strong id="connect-ssid"></strong><span id="connect-auth"></span></div>
+      <label id="connect-password-label"><span data-i18n="password">密码</span><span class="password-input"><input id="connect-password" type="password" maxlength="63" autocomplete="current-password"><button id="connect-eye" class="icon-button" type="button" aria-label="Show password"><i data-icon="eye"></i></button></span></label>
+      <p class="field-note" data-i18n="switchNotice">切换网络会结束当前调试连接，页面可能暂时断开</p>
+      <div class="dialog-actions"><button class="command" value="cancel" type="button" id="connect-cancel" data-i18n="cancel">取消</button><button class="command primary" type="submit" data-i18n="connect">连接</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.v6.js"></script>
+</body>
+</html>
