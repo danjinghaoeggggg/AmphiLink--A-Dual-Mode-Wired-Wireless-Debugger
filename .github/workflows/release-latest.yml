@@ -163,6 +163,7 @@ jobs:
               "Accept": "application/vnd.github+json",
               "Authorization": f"Bearer {token}",
               "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "amphilink-release-workflow",
           }
 
           def request(method, path, payload=None, content_type="application/json"):
@@ -173,17 +174,28 @@ jobs:
               if body is not None:
                   request_headers["Content-Type"] = content_type
               req = Request(urljoin(api_root, path), data=body, headers=request_headers, method=method)
-              with urlopen(req) as response:
-                  raw = response.read()
-                  return json.loads(raw) if raw else None
+              try:
+                  with urlopen(req) as response:
+                      raw = response.read()
+                      return json.loads(raw) if raw else None
+              except HTTPError as error:
+                  details = error.read().decode("utf-8", errors="replace")
+                  print(f"GitHub API {method} {path} failed ({error.code}): {details}")
+                  raise
 
-          ref_path = f"repos/{repository}/git/refs/tags/latest"
+          tag_path = f"repos/{repository}/git/refs/tags/latest"
           try:
-              request("PATCH", ref_path, {"sha": sha, "force": True})
+              request("GET", tag_path)
           except HTTPError as error:
               if error.code != 404:
                   raise
-              request("POST", f"repos/{repository}/git/refs", {"ref": "refs/tags/latest", "sha": sha})
+              request(
+                  "POST",
+                  f"repos/{repository}/git/refs",
+                  {"ref": "refs/tags/latest", "sha": sha},
+              )
+          else:
+              request("PATCH", tag_path, {"sha": sha, "force": True})
 
           title = "AmphiLink latest"
           body = Path("release-notes.md").read_text(encoding="utf-8")
