@@ -13,7 +13,7 @@ AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过
 - 较高调试速率：核心程序采用直接访问寄存器写法以支持更快的调试速率
 - 完整的配套软件：使用配套的VS Code扩展AmphiLink CFG Tool可快速方便地使用本调试器
 - OpenOCD原生指令支持：支持OpenOCD原生CMSIS-DAP相关指令，包括其较新版本中的TCP指令
-
+- 独立无线串口：Wi-Fi连接后提供原始UART-over-TCP通道
 ## 如何使用
 
 ### 硬件准备
@@ -26,13 +26,15 @@ AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过
 
    本工程是标准的ESP-IDF工程，可以使用ESP-IDF工具构建或烧录。当然，也可根据Release中的指南直接烧录已经构建好的固件。
 
-2. 参照下表完成主要的SWD调试引脚连接
+2. 参照下表完成主要的SWD调试引脚和无线串口引脚（如需）连接
 
    | AmphiLink引脚 | 目标设备引脚 | 说明 |
    | --- | --- | --- |
    | GPIO4 | SWCLK | SWD时钟 |
    | GPIO5 | SWDIO | SWD双向数据 |
    | GPIO6 | nRESET | 可选的目标复位信号 |
+   | GPIO16 | UART RX | 无线串口接收，连接目标设备 TX |
+   | GPIO17 | UART TX | 无线串口发送，连接目标设备 RX |
    | GND | GND | 必须共地 |
 
    调试信号使用3.3 V逻辑电平。
@@ -52,6 +54,8 @@ AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过
    | `DAP_PATH_MODE_FORCE_AUTO` | 忽略GPIO7，始终使用自动模式 |
 
    对于自动模式，程序默认先尝试进入无线模式，若失败则退回有线模式，您也可以通过更改[transport_path_config.h](components/APP/amphilink/transport_manager/private/transport_path_config.h)中宏DAP_PATH_AUTO_PREFER_WIRELESS来更改优先顺序
+
+   仅在无线模式下可以使用无线串口功能。
 
    **如果您使用的硬件没有合适的天线，请确保其不会进入无线模式，否则可能会引起芯片或模组发烫甚至损坏。建议始终保持GPIO7低电平（默认情况下）以免某些情况下（如一些特定方式烧录完成后）自动复位后选择并进入了错误的模式。**
 
@@ -75,7 +79,9 @@ AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过
 
    在该网页中可配置该调试器的名称和颜色ID（用于辨识），配置后调试器上的WS2812会显示对应的颜色（如有），同时可将该调试器连接到局域网Wi-Fi中，连接后热点将自动关闭，后续可以通过在局域网中访问该调试器的IP地址再次进入该网页。
 
-   配置完成后，相关数据会写入Flash，断电或复位不会导致数据丢失。仅重新烧录不包含`wifi_nvs`和`identity_nvs`分区镜像的应用固件时，配置也会保留。
+   网页中的“无线串口”区域可开启或关闭无线串口或配置 `115200 8N1` 等串口参数。
+
+   配置完成后，Wi-Fi配置和设备标识会写入Flash，断电或复位不会导致数据丢失。无线串口配置仅保存在运行内存中，复位后恢复为默认的 `115200 8N1`。仅重新烧录不包含`wifi_nvs`和`identity_nvs`分区镜像的应用固件时，Wi-Fi配置和设备标识也会保留。
 
 ### 开始调试
 
@@ -87,13 +93,13 @@ AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过
 
 1. 在VS Code扩展商店中下载并安装AmphiLink CFG Tool扩展
 
-   > AmphiLink CFG Tool是专为本项目开发的配套VS Code扩展，支持Windows、macOS和Linux，可非常方便地完成调试工具链环境检查与配置、调试器选择、项目配置文件写入等。该扩展开源地址为：[https://github.com/danjinghaoeggggg/AmphiLink_CFG_Tool](https://github.com/danjinghaoeggggg/AmphiLink_CFG_Tool)
+   > AmphiLink CFG Tool是专为本项目开发的配套VS Code扩展，支持Windows、macOS和Linux，可非常方便地完成调试工具链环境检查与配置、调试器选择，并为当前嵌入式工程生成Cortex-Debug配置。该扩展开源地址为：[https://github.com/danjinghaoeggggg/AmphiLink_CFG_Tool](https://github.com/danjinghaoeggggg/AmphiLink_CFG_Tool)
 
    ![通过VS Code扩展商店搜索找到AmphiLink CFG Tool](<README_media/通过vscode扩展商店搜索找到AmphiLink CFG Tool.png>)
 
 2. 使用AmphiLink CFG Tool进行环境检查
 
-   点击VS Code侧边栏中的图标打开AmphiLink CFG Tool扩展 -> 点击环境检查 -> 点击重新检查，进行环境检查，如果环境检查不通过可以通过点击安装按钮（下图绿色框中的按钮）并根据提示进行安装。
+   点击VS Code Activity Bar 中的 AmphiLink CFG Tool 图标，打开“环境检查”页并点击“重新检查”。如果检查不通过，可以点击安装按钮（下图绿色框中的按钮）并根据提示进行安装。
 
    ![环境安装](README_media/环境安装.png)
 
@@ -105,7 +111,7 @@ AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过
 
 3. 选择设备
 
-   在AmphiLink CFG Tool中点击设备连接 -> 点击刷新设备并选择，无线设备的名称和颜色圆点与在配置网页中配置的内容对应，同时与WS2812显示的颜色对应（如有），以便于辨识。
+   在AmphiLink CFG Tool中打开“设备连接”页，点击“刷新设备”并选择设备。无线设备的名称和颜色圆点与在配置网页中配置的内容对应，同时与WS2812显示的颜色对应（如有），以便于辨识。
 
    ![选择设备](README_media/选择设备.png)
 
@@ -113,15 +119,25 @@ AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过
 
 4. 生成项目配置文件
 
-   在AmphiLink CFG Tool中确认配置详细，并设置调试速度。一般情况下，AmphiLink CFG Tool会自动识别工程并记录ELF文件位置并选择目标配置，若自动配置没有成功也可以手动设置。一切无误后点击为当前项目保存按钮。
+   在AmphiLink CFG Tool中确认“调试配置”，并设置调试速度。一般情况下，AmphiLink CFG Tool会自动识别工程并记录ELF文件位置并选择目标配置，若自动配置没有成功也可以手动设置。一切无误后点击为当前项目保存按钮。
 
-   ![配置详细](README_media/配置详细.png)
+   ![调试配置](README_media/调试配置.png)
 
 5. 进行调试
 
-   打开VS Code的Run and Debug视图，选择生成的AmphiLink配置，然后进行调试。
+   打开VS Code的Run and Debug视图，选择生成的AmphiLink Cortex-Debug配置，然后进行调试。
 
    ![进行调试](README_media/进行调试.png)
+
+### 使用无线串口功能
+
+连接到无线AmphiLink后，在AmphiLink CFG Tool中选择“无线串口”页即可使用无线串口功能。
+
+![无线串口](README_media/无线串口.png)
+
+无线模式连接成功后，设备会在 TCP `4443` 提供独立的原始 UART-over-TCP 通道。使用终端程序或其他 TCP 客户端连接设备 IP 的 `4443` 端口即可收发串口数据；数据不包含帧头、转义或换行。TCP 客户端发送的数据从 GPIO17（TX）输出，目标设备从 GPIO16（RX）输入的数据发送回 TCP 客户端。
+
+无线串口默认启用，默认参数为 `115200 8N1`。AmphiLink CFG Tool中的“无线串口”页会自动连接选中的无线设备，并提供ASCII文本、十六进制和二进制的收发格式。波特率、数据位、校验位和停止位属于设备硬件UART参数，不属于TCP客户端配置；请通过“打开配置网页”按钮进入设备网页进行修改。串口配置不会写入Flash，设备复位后恢复默认值；保存配置时，如果有串口客户端在线，该客户端会被断开，CMSIS-DAP调试客户端不受影响。串口服务仅在无线模式下启动，有线USB模式不会监听TCP `4443`。
 
 ## 面向开发者
 
@@ -131,10 +147,10 @@ AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过
 
 | 配置文件 | 主要配置项 | 说明 |
 | --- | --- | --- |
-| [bsp_pin_config.h](components/BSP/inc/bsp_pin_config.h) | `BSP_PIN_*` | SWD、复位、模式选择、状态灯和WS2812引脚 |
+| [bsp_pin_config.h](components/BSP/inc/bsp_pin_config.h) | `BSP_PIN_*` | SWD、复位、模式选择、状态灯、WS2812和UART引脚 |
 | [transport_path_config.h](components/APP/amphilink/transport_manager/private/transport_path_config.h) | `DAP_PATH_SELECTION_MODE`、`DAP_PATH_AUTO_PREFER_WIRELESS` | 传输路径选择方式和自动模式优先级 |
 | [DAP_config.h](components/Module/DAP/inc/DAP_config.h) | `DAP_DEFAULT_SWJ_CLOCK`、`DAP_PACKET_SIZE`、`DAP_PACKET_COUNT`等 | CMSIS-DAP能力、默认时钟和缓冲配置 |
-| [wireless_config.h](components/APP/amphilink/tcp/inc/wireless_config.h) | `DAP_TCP_SERVER_PORT`、`DAP_DISCOVERY_UDP_PORT`、`DAP_DISCOVERY_INTERVAL_MS` | TCP服务和UDP发现参数 |
+| [wireless_config.h](components/APP/amphilink/tcp/inc/wireless_config.h) | `DAP_TCP_SERVER_PORT`、`DAP_DISCOVERY_UDP_PORT`、`SERIAL_TCP_SERVER_PORT` | TCP服务和UDP发现参数 |
 | [wireless_secrets_example.h](components/APP/amphilink/tcp/inc/wireless_secrets_example.h) | `ADMIN_PASSWORD` | 配置热点及网页管理密码；请按文件内说明新建不受版本控制的`wireless_secrets.h` |
 
 ### 接口说明
@@ -150,7 +166,8 @@ components/
 ├── Module/
 │   ├── DAP/                       # CMSIS-DAP核心、SWD时序和硬件适配
 │   ├── flash/                     # NVS、FATFS和SPIFFS存储管理
-│   ├── network/                   # Wi-Fi管理、TCP服务器和UDP广播
+│   ├── network/                   # Wi-Fi管理、多实例TCP服务器和UDP广播
+│   ├── serial/                    # UART-over-TCP无线串口桥接
 │   ├── sw3/                       # 两档/三档模式选择输入
 │   ├── usb/                       # TinyUSB设备栈和USB描述符
 │   └── ws2812/                    # 设备颜色状态指示
@@ -158,8 +175,9 @@ components/
     ├── core/                      # DAP请求、响应队列和命令执行任务
     ├── transport_manager/         # 有线/无线传输路径选择
     ├── usb/                       # CMSIS-DAP USB传输适配
-    └── tcp/                       # TCP帧、Wi-Fi配置存储、设备发现和配置网页
-web/                               # 构建到webpage_vfs分区的配置网页静态资源
+    ├── tcp/                       # TCP帧、Wi-Fi配置存储、设备发现和配置网页
+    └── serial/                    # 无线串口配置存储
+web/                               # 构建到webpage_vfs分区的配置网页静态资源（/icon.svg映射为image/svg+xml）
 ```
 
 项目依赖方向多为`APP -> Module -> BSP`。启动时APP层依次初始化存储、DAP核心服务和传输管理器；传输管理器只启动选中的USB或TCP路径。两种传输共享同一套DAP核心队列和命令执行逻辑，从而保持有线与无线模式的CMSIS-DAP行为一致。
@@ -246,6 +264,8 @@ id,data,u8,1
 | Connected状态灯 | GPIO42 | `BSP_PIN_STATUS_CONNECTED_LED` | 是 | 可选，高电平点亮；普通LED需要串联限流电阻 |
 | Running状态灯 | GPIO41 | `BSP_PIN_STATUS_RUNNING_LED` | 是 | 可选，高电平点亮；普通LED需要串联限流电阻 |
 | WS2812状态灯 | GPIO48 | `BSP_PIN_RMT_TX` | 是 | 可选，数据输出连接WS2812的DIN，用于显示设备颜色 |
+| 无线串口 RX | GPIO16 | `BSP_PIN_UART_RX` | 是 | UART接收；连接目标设备TX |
+| 无线串口 TX | GPIO17 | `BSP_PIN_UART_TX` | 是 | UART发送；连接目标设备RX |
 | 2.4 GHz天线 | 取决于模组或射频设计 | 无 | 取决于硬件 | 无线模式必须具有板载天线或正确连接的外置天线 |
 
 表中标记为可更改的引脚统一在[bsp_pin_config.h](components/BSP/inc/bsp_pin_config.h)中配置，修改后需要重新编译和烧录固件。GND必须与目标设备共地，不属于可配置信号。重映射引脚时还应满足以下要求：
@@ -295,6 +315,7 @@ AmphiLink is a dual-mode CMSIS-DAP V2 debugger based on the ESP32-S3. It support
 - High debug speed: the core implementation accesses registers directly to achieve higher debug throughput
 - Complete companion software: the AmphiLink CFG Tool VS Code extension makes the debugger quick and easy to use
 - Native OpenOCD command support: supports OpenOCD's native CMSIS-DAP commands, including the TCP commands available in recent versions
+- Independent wireless serial: a raw UART-over-TCP channel on TCP `4443` after Wi-Fi connection, separate from the CMSIS-DAP core
 
 ## Usage
 
@@ -308,13 +329,15 @@ A commonly available ESP32-S3 N16R8 development board is sufficient as the main 
 
    This is a standard ESP-IDF project and can be built and flashed with the ESP-IDF tools. Alternatively, follow the instructions in the release to flash a prebuilt firmware image.
 
-2. Connect the main SWD signals as shown below
+2. Connect the main SWD and wireless serial signals (as needed) as shown below
 
    | AmphiLink pin | Target pin | Description |
    | --- | --- | --- |
    | GPIO4 | SWCLK | SWD clock |
    | GPIO5 | SWDIO | Bidirectional SWD data |
    | GPIO6 | nRESET | Optional target reset signal |
+   | GPIO16 | UART RX | Wireless serial receive; connect to target TX |
+   | GPIO17 | UART TX | Wireless serial transmit; connect to target RX |
    | GND | GND | A common ground is required |
 
    The debug signals use 3.3 V logic levels.
@@ -334,6 +357,8 @@ A commonly available ESP32-S3 N16R8 development board is sufficient as the main 
    | `DAP_PATH_MODE_FORCE_AUTO` | Ignores GPIO7 and always uses automatic mode |
 
    In automatic mode, the firmware attempts wireless mode first and falls back to wired mode if wireless startup fails. You can change this priority through the `DAP_PATH_AUTO_PREFER_WIRELESS` macro in [transport_path_config.h](components/APP/amphilink/transport_manager/private/transport_path_config.h).
+
+   Wireless serial is available only in wireless mode.
 
    **If your hardware has no suitable antenna, make sure it cannot enter wireless mode; otherwise, the chip or module may overheat or be damaged. With the default configuration, keep GPIO7 low at all times so that an automatic reset, including one following certain flashing methods, cannot select the wrong mode.**
 
@@ -357,7 +382,19 @@ A commonly available ESP32-S3 N16R8 development board is sufficient as the main 
 
    The page lets you configure the debugger name and color ID for identification. After configuration, the onboard WS2812, when present, displays the corresponding color. You can also connect the debugger to a LAN Wi-Fi network. The access point closes automatically after a successful connection, and the page remains available later through the debugger's LAN IP address.
 
-   After configuration, the relevant data is stored in flash and is not lost after power loss or reset. It is also preserved when only application firmware that does not include `wifi_nvs` or `identity_nvs` partition images is reflashed.
+   The Wireless serial section can enable or disable the service and configure parameters such as `115200 8N1`. After Wi-Fi connects, the raw serial service listens on TCP `4443` using fixed GPIO16 (RX) and GPIO17 (TX), independently of the CMSIS-DAP debug service on TCP `4441`.
+
+   After configuration, Wi-Fi profiles and device identity are stored in flash and survive power loss or reset. Wireless serial settings are held in RAM only and return to the default `115200 8N1` after reset. Wi-Fi profiles and identity are also preserved when only application firmware that does not include `wifi_nvs` or `identity_nvs` partition images is reflashed.
+
+### Using Wireless Serial
+
+After connecting to a wireless AmphiLink, select `Wireless Serial` in AmphiLink CFG Tool to use the wireless serial function.
+
+![Wireless Serial](README_media/无线串口.png)
+
+After a wireless connection is established, the device provides an independent raw UART-over-TCP channel on TCP port `4443`. Connect a terminal program or another TCP client to the device IP and port `4443` to exchange serial data; the stream has no header, escaping, or line-ending conversion. TCP client data is output on GPIO17 (TX), and data received from the target on GPIO16 (RX) is sent back to the TCP client.
+
+Wireless serial is enabled by default with `115200 8N1`. AmphiLink CFG Tool automatically connects the Wireless Serial panel to the selected wireless device and provides ASCII text, hexadecimal, and binary receive and send formats. Baud rate, data bits, parity, and stop bits are hardware UART settings, not TCP client settings; use the `Open configuration page` button to change them on the device. Serial settings are kept in RAM and are not written to flash, so a reset restores the defaults. Saving while a serial client is connected disconnects that client only; a CMSIS-DAP debug client is unaffected. The serial service starts only in wireless mode; wired USB mode does not listen on TCP `4443`.
 
 ### Start Debugging
 
@@ -369,13 +406,13 @@ The following walkthrough uses the VS Code -> Cortex-Debug -> OpenOCD toolchain 
 
 1. Download and install AmphiLink CFG Tool from the VS Code extension marketplace
 
-   > AmphiLink CFG Tool is the companion VS Code extension developed specifically for this project. It supports Windows, macOS, and Linux and provides debug toolchain checks and setup, debugger selection, and project configuration generation. Its source code is available at [https://github.com/danjinghaoeggggg/AmphiLink_CFG_Tool](https://github.com/danjinghaoeggggg/AmphiLink_CFG_Tool).
+   > AmphiLink CFG Tool is the companion VS Code extension developed specifically for this project. It supports Windows, macOS, and Linux and provides debug toolchain checks and setup, debugger selection, and Cortex-Debug configuration generation for the current embedded project. Its source code is available at [https://github.com/danjinghaoeggggg/AmphiLink_CFG_Tool](https://github.com/danjinghaoeggggg/AmphiLink_CFG_Tool).
 
    ![Find AmphiLink CFG Tool in the VS Code extension marketplace](<README_media/通过vscode扩展商店搜索找到AmphiLink CFG Tool.png>)
 
 2. Check the environment with AmphiLink CFG Tool
 
-   Open AmphiLink CFG Tool from the icon in the VS Code sidebar, select the environment check, and click the recheck button. If a check fails, use the install button, shown in the green box below, and follow the prompts.
+   Open AmphiLink CFG Tool from the Activity Bar, select `Environment`, and click `Check again`. If a check fails, use the `Install` button, shown in the green box below, and follow the prompts.
 
    ![Environment installation](README_media/环境安装.png)
 
@@ -387,7 +424,7 @@ The following walkthrough uses the VS Code -> Cortex-Debug -> OpenOCD toolchain 
 
 3. Select a device
 
-   In AmphiLink CFG Tool, open the device connection section, refresh the device list, and select a device. A wireless device's name and colored dot correspond to the values configured on the web page, and the color also matches the WS2812 indicator when present, making devices easier to identify.
+   In AmphiLink CFG Tool, open `Devices`, click `Refresh devices`, and select a device. A wireless device's name and colored dot correspond to the values configured on the web page, and the color also matches the WS2812 indicator when present, making devices easier to identify.
 
    ![Select a device](README_media/选择设备.png)
 
@@ -395,13 +432,13 @@ The following walkthrough uses the VS Code -> Cortex-Debug -> OpenOCD toolchain 
 
 4. Generate the project configuration
 
-   Review the detailed settings in AmphiLink CFG Tool and set the debug speed. AmphiLink CFG Tool normally detects the project automatically, locates the ELF file, and selects the target configuration. If automatic setup does not succeed, these values can also be entered manually. When everything is correct, click the button to save the settings for the current project.
+   In `Debug Configuration`, confirm the target MCU, target config, ELF, and adapter speed. AmphiLink CFG Tool normally detects the project automatically, locates the ELF file, and selects the target configuration. If automatic setup does not succeed, these values can also be entered manually. When everything is correct, click `Save for current project`.
 
-   ![Detailed configuration](README_media/配置详细.png)
+   ![Debug configuration](README_media/调试配置.png)
 
 5. Start debugging
 
-   Open the Run and Debug view in VS Code, select the generated AmphiLink configuration, and start debugging.
+   Open the Run and Debug view in VS Code, select the generated AmphiLink Cortex-Debug configuration, and start debugging.
 
    ![Start debugging](README_media/进行调试.png)
 
@@ -413,10 +450,10 @@ Several compile-time macros provide quick project customization:
 
 | Configuration file | Main settings | Description |
 | --- | --- | --- |
-| [bsp_pin_config.h](components/BSP/inc/bsp_pin_config.h) | `BSP_PIN_*` | Pins for SWD, reset, mode selection, status LEDs, and WS2812 |
+| [bsp_pin_config.h](components/BSP/inc/bsp_pin_config.h) | `BSP_PIN_*` | Pins for SWD, reset, mode selection, status LEDs, WS2812, and UART |
 | [transport_path_config.h](components/APP/amphilink/transport_manager/private/transport_path_config.h) | `DAP_PATH_SELECTION_MODE`, `DAP_PATH_AUTO_PREFER_WIRELESS` | Transport selection policy and automatic-mode priority |
 | [DAP_config.h](components/Module/DAP/inc/DAP_config.h) | `DAP_DEFAULT_SWJ_CLOCK`, `DAP_PACKET_SIZE`, `DAP_PACKET_COUNT`, etc. | CMSIS-DAP capabilities, default clock, and buffering |
-| [wireless_config.h](components/APP/amphilink/tcp/inc/wireless_config.h) | `DAP_TCP_SERVER_PORT`, `DAP_DISCOVERY_UDP_PORT`, `DAP_DISCOVERY_INTERVAL_MS` | TCP service and UDP discovery settings |
+| [wireless_config.h](components/APP/amphilink/tcp/inc/wireless_config.h) | `DAP_TCP_SERVER_PORT`, `DAP_DISCOVERY_UDP_PORT`, `SERIAL_TCP_SERVER_PORT` | TCP service and UDP discovery settings |
 | [wireless_secrets_example.h](components/APP/amphilink/tcp/inc/wireless_secrets_example.h) | `ADMIN_PASSWORD` | Configuration access-point and web administration password; follow the file instructions to create an untracked `wireless_secrets.h` |
 
 ### Interface Reference
@@ -432,7 +469,8 @@ components/
 ├── Module/
 │   ├── DAP/                       # CMSIS-DAP core, SWD timing, and hardware adaptation
 │   ├── flash/                     # NVS, FATFS, and SPIFFS storage management
-│   ├── network/                   # Wi-Fi manager, TCP server, and UDP broadcaster
+│   ├── network/                   # Wi-Fi manager, multi-instance TCP servers, and UDP broadcaster
+│   ├── serial/                    # UART-over-TCP wireless serial bridge
 │   ├── sw3/                       # Two-position/three-position mode input
 │   ├── usb/                       # TinyUSB device stack and USB descriptors
 │   └── ws2812/                    # Device color and status indication
@@ -440,8 +478,9 @@ components/
     ├── core/                      # DAP request/response queues and command worker
     ├── transport_manager/         # Wired/wireless transport selection
     ├── usb/                       # CMSIS-DAP USB transport adapter
-    └── tcp/                       # TCP framing, Wi-Fi profile storage, discovery, and web portal
-web/                               # Static web assets built into the webpage_vfs partition
+    ├── tcp/                       # TCP framing, Wi-Fi profile storage, discovery, and web portal
+    └── serial/                    # Wireless serial configuration storage
+web/                               # Static web assets built into webpage_vfs (/icon.svg is served as image/svg+xml)
 ```
 
 Most dependencies follow the direction `APP -> Module -> BSP`. During startup, the APP layer initializes storage, the DAP core service, and the transport manager in sequence. The transport manager starts only the selected USB or TCP path. Both transports share the same DAP core queues and command execution logic, keeping CMSIS-DAP behavior consistent between wired and wireless modes.
@@ -528,6 +567,8 @@ The project runs on most common ESP32-S3 development boards. A custom board can 
 | Connected status LED | GPIO42 | `BSP_PIN_STATUS_CONNECTED_LED` | Yes | Optional and active high; a standard LED requires a series current-limiting resistor |
 | Running status LED | GPIO41 | `BSP_PIN_STATUS_RUNNING_LED` | Yes | Optional and active high; a standard LED requires a series current-limiting resistor |
 | WS2812 status LED | GPIO48 | `BSP_PIN_RMT_TX` | Yes | Optional; connect the data output to WS2812 DIN to display the device color |
+| Wireless serial RX | GPIO16 | `BSP_PIN_UART_RX` | Yes | UART receive; connect to target TX |
+| Wireless serial TX | GPIO17 | `BSP_PIN_UART_TX` | Yes | UART transmit; connect to target RX |
 | 2.4 GHz antenna | Depends on the module or RF design | None | Hardware-dependent | Wireless mode requires an onboard antenna or a correctly connected external antenna |
 
 Pins marked as changeable are configured in [bsp_pin_config.h](components/BSP/inc/bsp_pin_config.h). Rebuild and flash the firmware after changing them. GND must be shared with the target and is not a configurable signal. Remapped pins must also meet these requirements:

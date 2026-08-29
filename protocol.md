@@ -13,6 +13,7 @@
 | --- | --- | --- | --- |
 | 设备发现 | UDP/IPv4 广播 | `4442` | 在局域网内发现在线设备 |
 | 无线调试 | TCP/IPv4 | `4441` | 承载 CMSIS-DAP v2 请求和响应 |
+| 无线串口 | TCP/IPv4 | `4443` | 承载 GPIO16/GPIO17 UART 原始字节流 |
 | 有线调试 | USB 2.0 Vendor Bulk | OUT `0x01` / IN `0x81` | 承载 CMSIS-DAP v2 请求和响应 |
 | 配置服务 | HTTP/1.1 | `80` | 管理设备标识和 Wi-Fi 配置 |
 
@@ -81,6 +82,10 @@ TCP 是字节流协议。一个帧可以被拆分到多次发送中，多个帧�
 
 固件支持最多 8 个 CMSIS-DAP 包的内部队列，并支持标准 `DAP_QueueCommands`、`DAP_ExecuteCommands` 和 `DAP_TransferAbort` 语义。队列容量是固件实现细节，客户端仍应进行合理的流量控制，并及时读取响应。
 
+### 无线串口接口
+
+Wi-Fi STA 连接后，设备在 TCP `4443` 提供独立的 UART-over-TCP 服务。该服务不使用 CMSIS-DAP 命令或帧头，连接建立后双方直接交换原始字节流；同一时间只接受一个客户端。TCP 客户端发送的数据写入 UART TX（GPIO17），UART RX（GPIO16）收到的数据发送给客户端；没有客户端时接收数据直接丢弃。Wi-Fi 断开、进入配置热点或串口服务被禁用时，客户端会被断开。硬件流控固定为 `none`，默认配置为 `115200 8N1`。
+
 ### USB 调试接口
 
 #### 设备标识
@@ -120,6 +125,8 @@ API 基础路径为 `/api/v1`，请求和响应正文均为 JSON。响应使用 
 
 除 `POST /api/v1/login` 外，所有 API 都要求携带登录接口返回的 `amphilink_auth` Cookie。该 Cookie 带有 `HttpOnly`、`SameSite=Strict` 和 `Path=/` 属性，并在配置服务重启后失效。
 
+网页顶部图标通过静态资源 `GET /icon.svg` 提供，响应类型为 `image/svg+xml`。
+
 登录密码与配置热点密码相同。默认开发配置为 `12345678`，实际部署可能不同，客户端不应写死该值。
 
 #### 登录
@@ -153,11 +160,33 @@ API 基础路径为 `/api/v1`，请求和响应正文均为 JSON。响应使用 
   "ip":"192.168.1.42",
   "ap_ssid":"AmphiLink-A1B2C3",
   "scanning":false,
-  "dap_client":false
+  "dap_client":false,
+  "serial_enabled":true,
+  "serial_client":false
 }
 ```
 
 `mode` 的可能值为 `starting`、`connecting`、`sta` 和 `ap`。`dap_client` 表示当前是否存在 TCP 调试客户端。
+
+`serial_enabled` 表示无线串口服务是否启用，`serial_client` 表示 TCP `4443` 是否存在客户端。
+
+##### `GET /api/v1/serial`
+
+返回当前串口配置。该接口需要登录 Cookie：
+
+```json
+{"revision":1,"enabled":true,"port":4443,"rx_pin":16,"tx_pin":17,"baudrate":115200,"data_bits":8,"parity":"none","stop_bits":1,"flow_control":"none","client":false}
+```
+
+##### `PUT /api/v1/serial`
+
+请求正文必须包含最近一次读取的 `revision`：
+
+```json
+{"revision":1,"enabled":true,"baudrate":115200,"data_bits":8,"parity":"none","stop_bits":1}
+```
+
+允许的波特率为 `9600`、`19200`、`38400`、`57600`、`115200`、`230400`、`460800`、`921600`；数据位为 `5`-`8`，校验位为 `none`、`even` 或 `odd`，停止位为 `1` 或 `2`。成功后配置立即生效并返回递增的 `revision`。配置仅保存在运行内存中，不写入 Flash，设备复位后恢复默认值。版本不匹配返回 `409 revision_conflict`，参数非法返回 `400 invalid_serial`。串口客户端在线时保存会断开该串口客户端，但不会影响 DAP 客户端。
 
 ##### `GET /api/v1/device`
 
@@ -289,6 +318,7 @@ SSID 必须是 1-32 字节的合法 UTF-8 字符串。密码为空字符串时�
 | `400 Bad Request` | `invalid_json` | JSON 缺失、类型错误或字段不合法 |
 | `400 Bad Request` | `invalid_identity` | 设备名称或颜色编号不合法 |
 | `400 Bad Request` | `invalid_profile` | SSID 或密码不合法 |
+| `400 Bad Request` | `invalid_serial` | 串口参数不合法 |
 | `400 Bad Request` | `invalid_size` | 字段或正文长度不合法 |
 | `400 Bad Request` | `invalid_id` | 路径中的操作 ID 不合法 |
 | `401 Unauthorized` | `invalid_password` | 登录密码错误 |
@@ -316,6 +346,7 @@ The current firmware provides the following interfaces:
 | --- | --- | --- | --- |
 | Device discovery | UDP/IPv4 broadcast | `4442` | Discover online devices on the local network |
 | Wireless debugging | TCP/IPv4 | `4441` | Carry CMSIS-DAP v2 requests and responses |
+| Wireless serial | TCP/IPv4 | `4443` | Carry raw UART bytes on GPIO16/GPIO17 |
 | Wired debugging | USB 2.0 Vendor Bulk | OUT `0x01` / IN `0x81` | Carry CMSIS-DAP v2 requests and responses |
 | Configuration service | HTTP/1.1 | `80` | Manage device identity and Wi-Fi configuration |
 
@@ -384,6 +415,10 @@ If any condition is not met, the current connection is closed without a protocol
 
 The firmware provides an internal queue for up to eight CMSIS-DAP packets and implements the standard `DAP_QueueCommands`, `DAP_ExecuteCommands`, and `DAP_TransferAbort` semantics. Queue capacity is a firmware implementation detail; clients should still apply reasonable flow control and read responses promptly.
 
+### Wireless Serial Interface
+
+After a Wi-Fi STA connection is established, the device provides an independent UART-over-TCP service on port `4443`. It does not use CMSIS-DAP commands or framing; the connection carries raw bytes in both directions and accepts one client at a time. Bytes sent by the TCP client are written to UART TX (GPIO17), while bytes received on UART RX (GPIO16) are sent to the client. RX bytes are discarded when no client is connected. Wi-Fi disconnects, setup-AP mode, or disabling the service disconnects the client. Hardware flow control is fixed to `none`; the default is `115200 8N1`.
+
 ### USB Debug Interface
 
 #### Device Identification
@@ -423,6 +458,8 @@ The API base path is `/api/v1`. Request and response bodies use JSON. Responses 
 
 Except for `POST /api/v1/login`, every API request must include the `amphilink_auth` cookie returned by the login endpoint. The cookie has the `HttpOnly`, `SameSite=Strict`, and `Path=/` attributes and becomes invalid when the configuration service restarts.
 
+The page's top brand icon is served as the static resource `GET /icon.svg` with content type `image/svg+xml`.
+
 The login password is the same as the configuration access-point password. The default development configuration is `12345678`, but deployments may use a different value. Clients must not hard-code the default password.
 
 #### Login
@@ -456,11 +493,31 @@ Returns the current network and debug-connection status:
   "ip":"192.168.1.42",
   "ap_ssid":"AmphiLink-A1B2C3",
   "scanning":false,
-  "dap_client":false
+  "dap_client":false,
+  "serial_enabled":true,
+  "serial_client":false
 }
 ```
 
-Possible `mode` values are `starting`, `connecting`, `sta`, and `ap`. `dap_client` indicates whether a TCP debug client is currently connected.
+Possible `mode` values are `starting`, `connecting`, `sta`, and `ap`. `dap_client` indicates whether a TCP debug client is currently connected. `serial_enabled` indicates whether the wireless serial service is enabled, and `serial_client` indicates whether TCP port `4443` has a connected client.
+
+##### `GET /api/v1/serial`
+
+Returns the current serial configuration and requires the login cookie:
+
+```json
+{"revision":1,"enabled":true,"port":4443,"rx_pin":16,"tx_pin":17,"baudrate":115200,"data_bits":8,"parity":"none","stop_bits":1,"flow_control":"none","client":false}
+```
+
+##### `PUT /api/v1/serial`
+
+The request must include the most recently read `revision`:
+
+```json
+{"revision":1,"enabled":true,"baudrate":115200,"data_bits":8,"parity":"none","stop_bits":1}
+```
+
+Allowed baud rates are `9600`, `19200`, `38400`, `57600`, `115200`, `230400`, `460800`, and `921600`; data bits are `5`-`8`, parity is `none`, `even`, or `odd`, and stop bits are `1` or `2`. A successful update applies immediately and returns an incremented `revision`. Configuration is held in RAM only, is not written to flash, and returns to the defaults after reset. Mismatched revisions return `409 revision_conflict`, and invalid values return `400 invalid_serial`. Saving while a serial client is connected disconnects only that client and leaves a DAP client untouched.
 
 ##### `GET /api/v1/device`
 
@@ -592,6 +649,7 @@ Common error codes are listed below:
 | `400 Bad Request` | `invalid_json` | JSON is missing, has an incorrect type, or contains invalid fields |
 | `400 Bad Request` | `invalid_identity` | Device name or color identifier is invalid |
 | `400 Bad Request` | `invalid_profile` | SSID or password is invalid |
+| `400 Bad Request` | `invalid_serial` | Serial parameters are invalid |
 | `400 Bad Request` | `invalid_size` | Field or body length is invalid |
 | `400 Bad Request` | `invalid_id` | Operation ID in the path is invalid |
 | `401 Unauthorized` | `invalid_password` | Login password is incorrect |

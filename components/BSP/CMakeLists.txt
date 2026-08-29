@@ -6,10 +6,12 @@ idf_component_register(
         "src/bsp_system.c"
         "src/bsp_usb.c"
         "src/bsp_rmt_tx.c"
+        "src/bsp_uart.c"
     INCLUDE_DIRS
         "inc"
     REQUIRES
         esp_adc
+        esp_driver_uart
         esp_driver_gpio
         esp_driver_rmt
         esp_hw_support

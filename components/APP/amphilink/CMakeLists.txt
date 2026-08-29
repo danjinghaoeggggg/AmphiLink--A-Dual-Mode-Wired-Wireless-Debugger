@@ -7,6 +7,7 @@ idf_component_register(
         "tcp/src/provisioning_server.c"
         "tcp/src/tcp_transport.c"
         "tcp/src/wifi_profile_store.c"
+        "serial/src/serial_config_store.c"
         "transport_manager/src/transport_manager.c"
         "usb/src/usb_transport.c"
     INCLUDE_DIRS
@@ -17,6 +18,7 @@ idf_component_register(
         "tcp/inc"
         "transport_manager/private"
         "usb/inc"
+        "serial/inc"
     REQUIRES
         DAP
         espressif__cjson
@@ -26,6 +28,7 @@ idf_component_register(
         freertos
         mbedtls
         network
+        serial
         nvs_flash
         sw3
         usb

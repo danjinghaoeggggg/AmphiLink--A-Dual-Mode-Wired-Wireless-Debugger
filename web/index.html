@@ -10,7 +10,7 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true"><i data-icon="radio"></i></span>
+      <span class="brand-mark" aria-hidden="true"><img src="/icon.svg" alt=""></span>
       <div><strong>AmphiLink</strong><span>Wi-Fi Console</span></div>
     </div>
     <div class="language" role="group" aria-label="Language">
@@ -37,6 +37,7 @@
         <div><dt>SSID</dt><dd id="status-ssid">--</dd></div>
         <div><dt>IP</dt><dd id="status-ip">--</dd></div>
         <div><dt data-i18n="debugLink">调试链路</dt><dd id="status-dap">--</dd></div>
+        <div><dt data-i18n="serialLink">无线串口</dt><dd id="status-serial">--</dd></div>
       </dl>
     </div>
   </section>
@@ -67,9 +68,26 @@
       </form>
     </section>
 
+    <section class="workspace-section serial-section" aria-labelledby="serial-title">
+      <div class="section-heading">
+        <div><span class="section-index">02</span><h2 id="serial-title" data-i18n="wirelessSerial">无线串口</h2></div>
+        <div class="serial-heading-actions">
+          <label class="check-row serial-enabled"><input id="serial-enabled" form="serial-form" type="checkbox"><span data-i18n="serialEnabled">启用无线串口</span></label>
+          <span id="serial-client-tag" class="connected-tag" hidden data-i18n="serialClientConnected">客户端已连接</span>
+        </div>
+      </div>
+      <form id="serial-form" class="serial-form">
+        <label><span data-i18n="baudrate">波特率</span><select id="serial-baudrate"><option value="9600">9600</option><option value="19200">19200</option><option value="38400">38400</option><option value="57600">57600</option><option value="115200">115200</option><option value="230400">230400</option><option value="460800">460800</option><option value="921600">921600</option></select></label>
+        <label><span data-i18n="dataBits">数据位</span><select id="serial-data-bits"><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select></label>
+        <label><span data-i18n="parity">校验位</span><select id="serial-parity"><option value="none" data-i18n="parityNone">无</option><option value="even" data-i18n="parityEven">偶校验</option><option value="odd" data-i18n="parityOdd">奇校验</option></select></label>
+        <label><span data-i18n="stopBits">停止位</span><select id="serial-stop-bits"><option value="1">1</option><option value="2">2</option></select></label>
+        <div class="serial-actions"><span id="serial-error" class="field-error" role="alert"></span><button class="command primary" type="submit" data-i18n="save">保存</button></div>
+      </form>
+    </section>
+
     <section class="workspace-section" aria-labelledby="saved-title">
       <div class="section-heading">
-        <div><span class="section-index">02</span><h2 id="saved-title" data-i18n="savedNetworks">已保存网络</h2></div>
+        <div><span class="section-index">03</span><h2 id="saved-title" data-i18n="savedNetworks">已保存网络</h2></div>
         <button id="add-network" class="command primary" type="button"><i data-icon="plus"></i><span data-i18n="addNetwork">添加网络</span></button>
       </div>
       <div id="credentials-locked" class="locked-panel" hidden>
@@ -82,7 +100,7 @@
 
     <section class="workspace-section scan-section" aria-labelledby="scan-title">
       <div class="section-heading">
-        <div><span class="section-index">03</span><h2 id="scan-title" data-i18n="nearbyNetworks">附近网络</h2></div>
+        <div><span class="section-index">04</span><h2 id="scan-title" data-i18n="nearbyNetworks">附近网络</h2></div>
         <button id="scan-button" class="command" type="button"><i data-icon="refresh"></i><span data-i18n="scan">搜索</span></button>
       </div>
       <div id="scan-empty" class="empty"><i data-icon="radar"></i><span data-i18n="scanPrompt">搜索附近可用的 Wi-Fi</span></div>

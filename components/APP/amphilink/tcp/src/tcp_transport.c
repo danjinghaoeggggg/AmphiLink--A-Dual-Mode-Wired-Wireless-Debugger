@@ -19,6 +19,8 @@
 #include "network_tcp_server.h"
 #include "network_udp_broadcaster.h"
 #include "provisioning_server.h"
+#include "serial.h"
+#include "serial_config_store.h"
 #include "sdkconfig.h"
 #include "wifi_manager.h"
 #include "wifi_profile_store.h"
@@ -36,6 +38,9 @@ static dap_tcp_parser_t s_parser;
 static SemaphoreHandle_t s_state_mutex;
 static device_identity_t s_identity;
 static bool s_wifi_connected;
+static network_tcp_server_t *s_dap_server;
+static serial_config_t s_serial_config;
+static uint32_t s_serial_revision;
 
 static void secure_zero(void *data, size_t size)
 {
@@ -114,17 +119,17 @@ static void response_task(void *argument)
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Response frame encoding failed: %s",
                      esp_err_to_name(err));
-            network_tcp_server_disconnect_client();
+            network_tcp_server_disconnect_client(s_dap_server);
             continue;
         }
 
-        err = network_tcp_server_send(frame, frame_size);
+        err = network_tcp_server_send(s_dap_server, frame, frame_size);
         if (err == ESP_ERR_INVALID_STATE) {
             continue;
         }
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Response send failed: %s", esp_err_to_name(err));
-            network_tcp_server_disconnect_client();
+            network_tcp_server_disconnect_client(s_dap_server);
         }
     }
 }
@@ -222,7 +227,8 @@ static void identity_changed(const device_identity_t *identity, void *context)
 static void wifi_connection_changed(bool connected, void *context)
 {
     (void)context;
-    network_tcp_server_set_enabled(connected);
+    network_tcp_server_set_enabled(s_dap_server, connected);
+    serial_set_network_enabled(connected);
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_wifi_connected = connected;
@@ -233,6 +239,25 @@ static void wifi_connection_changed(bool connected, void *context)
     log_runtime_error("Discovery state update",
                       network_udp_broadcaster_set_enabled(connected));
     xSemaphoreGive(s_state_mutex);
+}
+
+static bool dap_client_active_callback(void *context)
+{
+    (void)context;
+    return network_tcp_server_has_client(s_dap_server);
+}
+
+static bool serial_client_active_callback(void *context)
+{
+    (void)context;
+    return serial_has_client();
+}
+
+static void disconnect_clients_callback(void *context)
+{
+    (void)context;
+    network_tcp_server_disconnect_client(s_dap_server);
+    serial_set_network_enabled(false);
 }
 
 static void log_cleanup_error(const char *resource, esp_err_t err)
@@ -247,6 +272,7 @@ static void tcp_transport_start_cleanup(bool response_task_started,
                                         bool wifi_manager_started,
                                         bool broadcaster_started,
                                         bool network_server_started,
+                                        bool serial_started,
                                         bool ws2812_started)
 {
     if (response_task_started && (s_response_task != NULL)) {
@@ -263,7 +289,11 @@ static void tcp_transport_start_cleanup(bool response_task_started,
         log_cleanup_error("UDP broadcaster", network_udp_broadcaster_stop());
     }
     if (network_server_started) {
-        log_cleanup_error("TCP server", network_tcp_server_stop());
+        log_cleanup_error("TCP server", network_tcp_server_stop(s_dap_server));
+        s_dap_server = NULL;
+    }
+    if (serial_started) {
+        log_cleanup_error("Serial transport", serial_stop());
     }
     if (ws2812_started) {
         log_cleanup_error("WS2812", ws2812_deinit());
@@ -274,6 +304,8 @@ static void tcp_transport_start_cleanup(bool response_task_started,
     }
     s_wifi_connected = false;
     memset(&s_identity, 0, sizeof(s_identity));
+    memset(&s_serial_config, 0, sizeof(s_serial_config));
+    s_serial_revision = 0U;
     dap_tcp_parser_reset(&s_parser);
 }
 
@@ -310,6 +342,15 @@ esp_err_t tcp_transport_start(void)
         goto failed_early;
     }
 
+    err = serial_config_store_init();
+    if (err != ESP_OK) {
+        goto failed_early;
+    }
+    err = serial_config_store_get(&s_serial_config, &s_serial_revision);
+    if (err != ESP_OK) {
+        goto failed_early;
+    }
+
     wifi_transport_profile_buffer_t *buffer = calloc(1U, sizeof(*buffer));
     if (buffer == NULL) {
         err = ESP_ERR_NO_MEM;
@@ -327,6 +368,7 @@ esp_err_t tcp_transport_start(void)
     bool broadcaster_started = false;
     bool network_server_started = false;
     bool response_task_started = false;
+    bool serial_started = false;
 
     /* Keep the DAP server disabled until Wi-Fi has initialized lwIP. */
     const network_tcp_server_config_t server_config = {
@@ -335,11 +377,17 @@ esp_err_t tcp_transport_start(void)
         .client_changed = tcp_client_changed,
         .context = NULL,
     };
-    err = network_tcp_server_start(&server_config);
+    err = network_tcp_server_start(&s_dap_server, &server_config);
     if (err != ESP_OK) {
         goto failed;
     }
     network_server_started = true;
+
+    err = serial_start(&s_serial_config);
+    if (err != ESP_OK) {
+        goto failed;
+    }
+    serial_started = true;
 
     const char initial_payload[] = "{}";
     const network_udp_broadcaster_config_t broadcaster_config = {
@@ -375,6 +423,9 @@ esp_err_t tcp_transport_start(void)
     /* The HTTP server creates sockets, so lwIP must be ready first. */
     const provisioning_server_config_t provisioning_config = {
         .identity_changed = identity_changed,
+        .dap_client_active = dap_client_active_callback,
+        .serial_client_active = serial_client_active_callback,
+        .disconnect_clients = disconnect_clients_callback,
         .context = NULL,
     };
     err = provisioning_server_start(&provisioning_config);
@@ -403,11 +454,12 @@ failed:
     free(buffer);
     tcp_transport_start_cleanup(response_task_started, provisioning_started,
                                 wifi_manager_started, broadcaster_started,
-                                network_server_started, ws2812_started);
+                                network_server_started, serial_started,
+                                ws2812_started);
     return err;
 
 failed_early:
-    tcp_transport_start_cleanup(false, false, false, false, false,
+    tcp_transport_start_cleanup(false, false, false, false, false, false,
                                 ws2812_started);
     return err;
 }

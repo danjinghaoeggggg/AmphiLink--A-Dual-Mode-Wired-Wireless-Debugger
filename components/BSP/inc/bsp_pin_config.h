@@ -9,5 +9,7 @@
 #define BSP_PIN_STATUS_RUNNING_LED   41U
 #define BSP_PIN_MODESEL              7U
 #define BSP_PIN_RMT_TX               48U
+#define BSP_PIN_UART_RX              16U
+#define BSP_PIN_UART_TX              17U
 
 #endif

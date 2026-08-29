@@ -27,6 +27,9 @@
 
 ### API 与网页
 
+- 新增独立无线串口 UART-over-TCP 服务（TCP `4443`），默认 `115200 8N1`，固定使用
+  GPIO16/GPIO17，并提供 `GET/PUT /api/v1/serial` 配置接口。
+- 网页增加无线串口配置区域，顶部品牌图标改为静态资源 `/icon.svg`。
 - 网络响应新增 `has_password` 和顶层 `locked` 字段；锁定状态返回修订号 `0`
   和空列表。
 - 新增 `GET /api/v1/networks/{id}/password`，用于登录后按需读取单个密码。

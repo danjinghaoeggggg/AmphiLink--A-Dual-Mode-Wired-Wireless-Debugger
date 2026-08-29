@@ -20,11 +20,15 @@ typedef struct {
     void *context;
 } network_tcp_server_config_t;
 
-esp_err_t network_tcp_server_start(const network_tcp_server_config_t *config);
-esp_err_t network_tcp_server_stop(void);
-void network_tcp_server_set_enabled(bool enabled);
-bool network_tcp_server_has_client(void);
-esp_err_t network_tcp_server_send(const uint8_t *data, size_t size);
-void network_tcp_server_disconnect_client(void);
+typedef struct network_tcp_server network_tcp_server_t;
+
+esp_err_t network_tcp_server_start(network_tcp_server_t **server,
+                                   const network_tcp_server_config_t *config);
+esp_err_t network_tcp_server_stop(network_tcp_server_t *server);
+void network_tcp_server_set_enabled(network_tcp_server_t *server, bool enabled);
+bool network_tcp_server_has_client(network_tcp_server_t *server);
+esp_err_t network_tcp_server_send(network_tcp_server_t *server,
+                                  const uint8_t *data, size_t size);
+void network_tcp_server_disconnect_client(network_tcp_server_t *server);
 
 #endif

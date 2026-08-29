@@ -14,6 +14,9 @@
 #include "esp_random.h"
 #include "flash_user.h"
 #include "network_tcp_server.h"
+#include "serial.h"
+#include "serial_config_store.h"
+#include "bsp_pin_config.h"
 #include "wifi_manager.h"
 #include "wifi_profile_store.h"
 #include "wireless_config.h"
@@ -72,7 +75,55 @@ static const static_resource_t s_static_resources[] = {
     {"/app.v6.css", "app.v2.css", "text/css; charset=utf-8", "no-store"},
     {"/app.v6.js", "app.v3.js", "application/javascript; charset=utf-8",
      "no-store"},
+    {"/icon.svg", "icon.svg", "image/svg+xml", "no-store"},
 };
+
+static const char *serial_parity_name(serial_parity_t parity)
+{
+    switch (parity) {
+    case SERIAL_PARITY_EVEN:
+        return "even";
+    case SERIAL_PARITY_ODD:
+        return "odd";
+    case SERIAL_PARITY_NONE:
+    default:
+        return "none";
+    }
+}
+
+static bool serial_parity_from_json(cJSON *item, serial_parity_t *parity)
+{
+    if (!cJSON_IsString(item) || (item->valuestring == NULL)) {
+        return false;
+    }
+    if (strcmp(item->valuestring, "none") == 0) {
+        *parity = SERIAL_PARITY_NONE;
+    } else if (strcmp(item->valuestring, "even") == 0) {
+        *parity = SERIAL_PARITY_EVEN;
+    } else if (strcmp(item->valuestring, "odd") == 0) {
+        *parity = SERIAL_PARITY_ODD;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+static cJSON *serial_json(const serial_config_t *config, uint32_t revision)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "revision", revision);
+    cJSON_AddBoolToObject(root, "enabled", config->enabled);
+    cJSON_AddNumberToObject(root, "port", SERIAL_TCP_SERVER_PORT);
+    cJSON_AddNumberToObject(root, "rx_pin", BSP_PIN_UART_RX);
+    cJSON_AddNumberToObject(root, "tx_pin", BSP_PIN_UART_TX);
+    cJSON_AddNumberToObject(root, "baudrate", config->baudrate);
+    cJSON_AddNumberToObject(root, "data_bits", config->data_bits);
+    cJSON_AddStringToObject(root, "parity", serial_parity_name(config->parity));
+    cJSON_AddNumberToObject(root, "stop_bits", config->stop_bits);
+    cJSON_AddStringToObject(root, "flow_control", "none");
+    cJSON_AddBoolToObject(root, "client", serial_has_client());
+    return root;
+}
 
 static const char *mode_name(wifi_manager_mode_t mode)
 {
@@ -214,6 +265,30 @@ static bool request_authenticated(httpd_req_t *request)
         } \
     } while (0)
 
+static bool dap_client_active(void)
+{
+    return (s_config.dap_client_active != NULL) &&
+           s_config.dap_client_active(s_config.context);
+}
+
+static bool serial_client_active(void)
+{
+    return (s_config.serial_client_active != NULL) &&
+           s_config.serial_client_active(s_config.context);
+}
+
+static bool any_client_active(void)
+{
+    return dap_client_active() || serial_client_active();
+}
+
+static void disconnect_clients(void)
+{
+    if (s_config.disconnect_clients != NULL) {
+        s_config.disconnect_clients(s_config.context);
+    }
+}
+
 static void generate_auth_token(void)
 {
     static const char hex[] = "0123456789abcdef";
@@ -274,6 +349,9 @@ static cJSON *receive_json(httpd_req_t *request)
 
 static bool json_uint32(cJSON *root, const char *name, uint32_t *value)
 {
+    if ((root == NULL) || (name == NULL) || (value == NULL)) {
+        return false;
+    }
     cJSON *item = cJSON_GetObjectItemCaseSensitive(root, name);
     if (!cJSON_IsNumber(item) || (item->valuedouble < 0.0) ||
         (item->valuedouble > 4294967295.0)) {
@@ -386,8 +464,108 @@ static esp_err_t status_get(httpd_req_t *request)
     cJSON_AddStringToObject(root, "ip", status.ip);
     cJSON_AddStringToObject(root, "ap_ssid", status.ap_ssid);
     cJSON_AddBoolToObject(root, "scanning", status.scanning);
-    cJSON_AddBoolToObject(root, "dap_client", network_tcp_server_has_client());
+    cJSON_AddBoolToObject(root, "dap_client", dap_client_active());
+    serial_config_t serial_config = {0};
+    uint32_t serial_revision = 0U;
+    bool serial_enabled =
+        (serial_config_store_get(&serial_config, &serial_revision) == ESP_OK) &&
+        serial_config.enabled;
+    (void)serial_revision;
+    cJSON_AddBoolToObject(root, "serial_enabled", serial_enabled);
+    cJSON_AddBoolToObject(root, "serial_client", serial_has_client());
     esp_err_t err = send_json(request, "200 OK", root);
+    cJSON_Delete(root);
+    return err;
+}
+
+static esp_err_t serial_get(httpd_req_t *request)
+{
+    REQUIRE_AUTH(request);
+    serial_config_t config;
+    uint32_t revision;
+    esp_err_t err = serial_config_store_get(&config, &revision);
+    if (err != ESP_OK) {
+        return send_error(request, "503 Service Unavailable", "not_ready");
+    }
+    cJSON *root = serial_json(&config, revision);
+    err = send_json(request, "200 OK", root);
+    cJSON_Delete(root);
+    return err;
+}
+
+static esp_err_t serial_put(httpd_req_t *request)
+{
+    REQUIRE_AUTH(request);
+    cJSON *body = receive_json(request);
+    uint32_t revision;
+    uint32_t baudrate;
+    uint32_t data_bits;
+    uint32_t stop_bits;
+    cJSON *enabled_item = (body == NULL) ? NULL
+                                         : cJSON_GetObjectItemCaseSensitive(
+                                               body, "enabled");
+    if (!cJSON_IsBool(enabled_item) || !json_uint32(body, "revision", &revision) ||
+        !json_uint32(body, "baudrate", &baudrate) ||
+        !json_uint32(body, "data_bits", &data_bits) ||
+        !json_uint32(body, "stop_bits", &stop_bits)) {
+        delete_sensitive_json(body);
+        return send_error(request, "400 Bad Request", "invalid_serial");
+    }
+    serial_parity_t parity;
+    if (!serial_parity_from_json(
+            cJSON_GetObjectItemCaseSensitive(body, "parity"), &parity)) {
+        delete_sensitive_json(body);
+        return send_error(request, "400 Bad Request", "invalid_serial");
+    }
+    serial_config_t candidate = {
+        .enabled = cJSON_IsTrue(enabled_item),
+        .baudrate = baudrate,
+        .data_bits = (uint8_t)data_bits,
+        .parity = parity,
+        .stop_bits = (uint8_t)stop_bits,
+    };
+    if (!serial_config_store_baudrate_allowed(candidate.baudrate) ||
+        (candidate.data_bits < 5U) || (candidate.data_bits > 8U) ||
+        (candidate.stop_bits < 1U) || (candidate.stop_bits > 2U)) {
+        delete_sensitive_json(body);
+        return send_error(request, "400 Bad Request", "invalid_serial");
+    }
+
+    serial_config_t previous;
+    uint32_t current_revision;
+    esp_err_t err = serial_config_store_get(&previous, &current_revision);
+    if (err != ESP_OK) {
+        delete_sensitive_json(body);
+        return send_error(request, "503 Service Unavailable", "not_ready");
+    }
+    if (revision != current_revision) {
+        delete_sensitive_json(body);
+        return send_error(request, "409 Conflict", "revision_conflict");
+    }
+    err = serial_apply_config(&candidate);
+    if (err != ESP_OK) {
+        delete_sensitive_json(body);
+        return send_error(request, "409 Conflict", "invalid_serial");
+    }
+    uint32_t next_revision;
+    err = serial_config_store_set(&candidate, revision, &next_revision);
+    if (err != ESP_OK) {
+        if (err == ESP_ERR_INVALID_STATE) {
+            serial_config_t latest;
+            uint32_t latest_revision;
+            if (serial_config_store_get(&latest, &latest_revision) == ESP_OK) {
+                (void)serial_apply_config(&latest);
+            }
+            delete_sensitive_json(body);
+            return send_error(request, "409 Conflict", "revision_conflict");
+        }
+        (void)serial_apply_config(&previous);
+        delete_sensitive_json(body);
+        return send_error(request, "500 Internal Server Error", "storage_error");
+    }
+    delete_sensitive_json(body);
+    cJSON *root = serial_json(&candidate, next_revision);
+    err = send_json(request, "200 OK", root);
     cJSON_Delete(root);
     return err;
 }
@@ -662,7 +840,7 @@ static esp_err_t order_put(httpd_req_t *request)
 static esp_err_t scan_post(httpd_req_t *request)
 {
     REQUIRE_AUTH(request);
-    if (network_tcp_server_has_client()) {
+    if (any_client_active()) {
         return send_error(request, "409 Conflict", "dap_client_active");
     }
     uint32_t operation_id;
@@ -805,7 +983,7 @@ static esp_err_t connect_post(httpd_req_t *request)
     if (err != ESP_OK) {
         return send_error(request, "409 Conflict", "operation_busy");
     }
-    network_tcp_server_disconnect_client();
+    disconnect_clients();
     cJSON *root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "operation_id", operation_id);
     err = send_json(request, "202 Accepted", root);
@@ -902,7 +1080,7 @@ esp_err_t provisioning_server_start(const provisioning_server_config_t *config)
     http_config.server_port = 80U;
     http_config.stack_size = 6144U;
     http_config.core_id = 0;
-    http_config.max_uri_handlers = 20U;
+    http_config.max_uri_handlers = 22U;
     http_config.lru_purge_enable = true;
     http_config.uri_match_fn = httpd_uri_match_wildcard;
     esp_err_t err = httpd_start(&s_server, &http_config);
@@ -920,6 +1098,12 @@ esp_err_t provisioning_server_start(const provisioning_server_config_t *config)
     }
     if (err == ESP_OK) {
         err = register_handler("/api/v1/device", HTTP_PUT, device_put);
+    }
+    if (err == ESP_OK) {
+        err = register_handler("/api/v1/serial", HTTP_GET, serial_get);
+    }
+    if (err == ESP_OK) {
+        err = register_handler("/api/v1/serial", HTTP_PUT, serial_put);
     }
     if (err == ESP_OK) {
         err = register_handler("/api/v1/networks", HTTP_GET, networks_get);

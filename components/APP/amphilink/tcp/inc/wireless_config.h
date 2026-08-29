@@ -3,7 +3,13 @@
 
 #define DAP_TCP_SERVER_PORT 4441U
 #define DAP_DISCOVERY_UDP_PORT 4442U
+#define SERIAL_TCP_SERVER_PORT 4443U
 #define DAP_DISCOVERY_INTERVAL_MS 2000U
+
+#define SERIAL_DEFAULT_ENABLED true
+#define SERIAL_DEFAULT_BAUDRATE 115200U
+#define SERIAL_DEFAULT_DATA_BITS 8U
+#define SERIAL_DEFAULT_STOP_BITS 1U
 
 #if __has_include("wireless_secrets.h")
 #include "wireless_secrets.h"

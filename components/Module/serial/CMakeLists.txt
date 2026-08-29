@@ -1,0 +1,10 @@
+idf_component_register(
+    SRCS
+        "src/serial.c"
+    INCLUDE_DIRS
+        "inc"
+    REQUIRES
+        BSP
+        freertos
+        network
+)
