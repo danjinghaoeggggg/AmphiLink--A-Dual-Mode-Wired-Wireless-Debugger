@@ -1,0 +1,240 @@
+name: Build and publish latest release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: latest-release
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v6.0.2
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build firmware
+        shell: bash
+        run: |
+          idf.py set-target esp32s3
+          idf.py build
+
+      - name: Prepare release assets and notes
+        shell: bash
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import shlex
+          import shutil
+          from pathlib import Path
+
+          build_dir = Path("build")
+          assets_dir = Path("release-assets")
+          assets_dir.mkdir(exist_ok=True)
+
+          flasher_path = build_dir / "flasher_args.json"
+          flasher = json.loads(flasher_path.read_text(encoding="utf-8"))
+          flash_files = flasher.get("flash_files", {})
+          if not flash_files:
+              raise SystemExit("build/flasher_args.json contains no flash files")
+
+          entries = []
+          used_names = set()
+          for offset, relative_path in sorted(
+              flash_files.items(), key=lambda item: int(item[0], 0)
+          ):
+              source = build_dir / relative_path
+              if not source.is_file():
+                  raise SystemExit(f"Missing build output: {source}")
+
+              name = Path(relative_path).name
+              if name in used_names:
+                  raise SystemExit(f"Duplicate release asset name: {name}")
+              used_names.add(name)
+              shutil.copy2(source, assets_dir / name)
+              entries.append((offset, name, relative_path))
+
+          (assets_dir / "flash-manifest.json").write_text(
+              json.dumps(
+                  [
+                      {"offset": offset, "asset": name, "build_path": relative}
+                      for offset, name, relative in entries
+                  ],
+                  indent=2,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+
+          changelog_lines = Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+          heading_index = next(
+              (index for index, line in enumerate(changelog_lines) if line.startswith("## ")),
+              None,
+          )
+          if heading_index is None:
+              raise SystemExit("CHANGELOG.md has no version section")
+          next_heading = next(
+              (
+                  index
+                  for index in range(heading_index + 1, len(changelog_lines))
+                  if changelog_lines[index].startswith("## ")
+              ),
+              len(changelog_lines),
+          )
+          changelog_section = "\n".join(changelog_lines[heading_index + 1:next_heading]).strip()
+
+          flash_args = [str(value) for value in flasher.get("write_flash_args", [])]
+          extra_args = flasher.get("extra_esptool_args", {})
+          command_args = ["esptool.py", "--chip", extra_args.get("chip", "esp32s3")]
+          for key in ("before", "after"):
+              if extra_args.get(key):
+                  command_args.extend([f"--{key}", str(extra_args[key])])
+          command_args.extend(flash_args)
+          command_args.append("write-flash")
+          for offset, name, _ in entries:
+              command_args.extend([offset, name])
+          flash_command = " ".join(shlex.quote(argument) for argument in command_args)
+
+          table = [
+              "| Flash 偏移 / Flash offset | Release 资产 / Release asset | 构建路径 / Build path |",
+              "| --- | --- | --- |",
+          ]
+          table.extend(
+              f"| `{offset}` | `{name}` | `{relative}` |"
+              for offset, name, relative in entries
+          )
+          notes = "\n".join(
+              [
+                  changelog_section,
+                  "",
+                  "## 烧录 / Flashing",
+                  "",
+                  "请根据下表中的 Flash 地址选择对应的镜像文件进行烧录。 / Use the image files and Flash offsets listed in the table below.",
+                  "",
+                  *table,
+                  "",
+                  "如果使用命令行，请在下载的镜像文件所在目录执行： / For command-line flashing, run this from the directory containing the downloaded images:",
+                  "",
+                  "```bash",
+                  flash_command,
+                  "```",
+                  "",
+                  "你也可以使用 [esp.eterill.xyz](https://esp.eterill.xyz/) 网页烧录工具进行烧录。 / You can also flash the firmware with the [esp.eterill.xyz](https://esp.eterill.xyz/) web flasher.",
+                  "",
+                  f"构建提交 / Build commit: `{__import__('os').environ['COMMIT_SHA']}`",
+                  "",
+                  "此预发布版本由 GitHub Actions 自动构建并发布。 / This pre-release was automatically built and published by GitHub Actions.",
+              ]
+          )
+          Path("release-notes.md").write_text(notes + "\n", encoding="utf-8")
+          PY
+
+      - name: Update latest pre-release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib.error import HTTPError
+          from urllib.parse import quote, urljoin
+          from urllib.request import Request, urlopen
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GITHUB_TOKEN"]
+          sha = os.environ["GITHUB_SHA"]
+          api_root = "https://api.github.com/"
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+
+          def request(method, path, payload=None, content_type="application/json"):
+              body = None if payload is None else (
+                  payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+              )
+              request_headers = dict(headers)
+              if body is not None:
+                  request_headers["Content-Type"] = content_type
+              req = Request(urljoin(api_root, path), data=body, headers=request_headers, method=method)
+              with urlopen(req) as response:
+                  raw = response.read()
+                  return json.loads(raw) if raw else None
+
+          ref_path = f"repos/{repository}/git/refs/tags/latest"
+          try:
+              request("PATCH", ref_path, {"sha": sha, "force": True})
+          except HTTPError as error:
+              if error.code != 404:
+                  raise
+              request("POST", f"repos/{repository}/git/refs", {"ref": "refs/tags/latest", "sha": sha})
+
+          title = "AmphiLink latest"
+          body = Path("release-notes.md").read_text(encoding="utf-8")
+          release_path = f"repos/{repository}/releases/tags/latest"
+          try:
+              release = request("GET", release_path)
+          except HTTPError as error:
+              if error.code != 404:
+                  raise
+              release = request(
+                  "POST",
+                  f"repos/{repository}/releases",
+                  {
+                      "tag_name": "latest",
+                      "target_commitish": sha,
+                      "name": title,
+                      "body": body,
+                      "draft": False,
+                      "prerelease": True,
+                  },
+              )
+          else:
+              while True:
+                  assets = request(
+                      "GET",
+                      f"repos/{repository}/releases/{release['id']}/assets?per_page=100&page=1",
+                  )
+                  if not assets:
+                      break
+                  for asset in assets:
+                      request("DELETE", f"repos/{repository}/releases/assets/{asset['id']}")
+              release = request(
+                  "PATCH",
+                  f"repos/{repository}/releases/{release['id']}",
+                  {
+                      "tag_name": "latest",
+                      "name": title,
+                      "body": body,
+                      "draft": False,
+                      "prerelease": True,
+                  },
+              )
+
+          upload_url = release["upload_url"].split("{", 1)[0]
+          for asset_path in sorted(Path("release-assets").iterdir()):
+              if not asset_path.is_file():
+                  continue
+              upload_path = f"{upload_url}?name={quote(asset_path.name)}"
+              request(
+                  "POST",
+                  upload_path,
+                  asset_path.read_bytes(),
+                  content_type="application/octet-stream",
+              )
+          PY
