@@ -37,6 +37,14 @@ static SemaphoreHandle_t s_state_mutex;
 static device_identity_t s_identity;
 static bool s_wifi_connected;
 
+static void secure_zero(void *data, size_t size)
+{
+    volatile uint8_t *bytes = data;
+    while (size-- > 0U) {
+        *bytes++ = 0U;
+    }
+}
+
 typedef struct {
     wifi_profile_snapshot_t snapshot;
     wifi_manager_credential_t credentials[WIFI_MANAGER_MAX_CREDENTIALS];
@@ -148,12 +156,14 @@ static esp_err_t save_candidate(const wifi_manager_credential_t *credential,
         credential->ssid, credential->password, &buffer->snapshot);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Unable to save Wi-Fi profile: %s", esp_err_to_name(err));
+        secure_zero(buffer, sizeof(*buffer));
         free(buffer);
         return err;
     }
     fill_manager_credentials(&buffer->snapshot, buffer->credentials);
     err = wifi_manager_set_credentials(buffer->credentials,
                                        buffer->snapshot.count);
+    secure_zero(buffer, sizeof(*buffer));
     free(buffer);
     return err;
 }
@@ -295,7 +305,7 @@ esp_err_t tcp_transport_start(void)
     s_wifi_connected = false;
     update_indicator_locked();
 
-    err = wifi_profile_store_init();
+    err = wifi_profile_store_init(ADMIN_PASSWORD);
     if (err != ESP_OK) {
         goto failed_early;
     }
@@ -307,6 +317,7 @@ esp_err_t tcp_transport_start(void)
     }
     err = wifi_profile_store_get(&buffer->snapshot);
     if (err != ESP_OK) {
+        secure_zero(buffer, sizeof(*buffer));
         free(buffer);
         goto failed_early;
     }
@@ -357,6 +368,7 @@ esp_err_t tcp_transport_start(void)
         goto failed;
     }
     wifi_manager_started = true;
+    secure_zero(buffer, sizeof(*buffer));
     free(buffer);
     buffer = NULL;
 
@@ -385,6 +397,9 @@ esp_err_t tcp_transport_start(void)
     return ESP_OK;
 
 failed:
+    if (buffer != NULL) {
+        secure_zero(buffer, sizeof(*buffer));
+    }
     free(buffer);
     tcp_transport_start_cleanup(response_task_started, provisioning_started,
                                 wifi_manager_started, broadcaster_started,

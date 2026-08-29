@@ -936,6 +936,12 @@ esp_err_t flash_user_nvs_get_blob(const char *namespace_name, const char *key,
         }
         nvs_close(handle);
     }
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_ERR_NOT_FOUND;
+    } else if ((err == ESP_ERR_NVS_TYPE_MISMATCH) ||
+               (err == ESP_ERR_NVS_INVALID_LENGTH)) {
+        err = ESP_ERR_INVALID_RESPONSE;
+    }
 
     flash_user_unlock();
     return err;
@@ -994,6 +1000,40 @@ esp_err_t flash_user_nvs_get_string(const char *namespace_name, const char *key,
         }
         nvs_close(handle);
     }
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_ERR_NOT_FOUND;
+    } else if ((err == ESP_ERR_NVS_TYPE_MISMATCH) ||
+               (err == ESP_ERR_NVS_INVALID_LENGTH)) {
+        err = ESP_ERR_INVALID_RESPONSE;
+    }
+
+    flash_user_unlock();
+    return err;
+}
+
+esp_err_t flash_user_nvs_erase_key(const char *namespace_name, const char *key)
+{
+    if ((namespace_name == NULL) || (key == NULL)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t err = flash_user_lock();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    nvs_handle_t handle;
+    err = flash_user_nvs_open(namespace_name, NVS_READWRITE, &handle);
+    if (err == ESP_OK) {
+        err = nvs_erase_key(handle, key);
+        if (err == ESP_OK) {
+            err = nvs_commit(handle);
+        }
+        nvs_close(handle);
+    }
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_ERR_NOT_FOUND;
+    }
 
     flash_user_unlock();
     return err;
@@ -1018,6 +1058,24 @@ esp_err_t flash_user_nvs_partition_init(const char *partition_label,
             err = nvs_flash_init_partition(partition_label);
         }
     }
+    if (err == ESP_ERR_NVS_PART_NOT_FOUND) {
+        err = ESP_ERR_NOT_FOUND;
+    }
+    flash_user_unlock();
+    return err;
+}
+
+esp_err_t flash_user_nvs_partition_erase(const char *partition_label)
+{
+    if (partition_label == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t err = flash_user_lock();
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_flash_erase_partition(partition_label);
     if (err == ESP_ERR_NVS_PART_NOT_FOUND) {
         err = ESP_ERR_NOT_FOUND;
     }

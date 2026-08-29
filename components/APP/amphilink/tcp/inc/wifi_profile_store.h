@@ -2,6 +2,7 @@
 #define WIFI_PROFILE_STORE_H
 
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -19,11 +20,15 @@ typedef struct {
 typedef struct {
     uint32_t revision;
     size_t count;
+    bool locked;
     wifi_profile_t profiles[WIFI_PROFILE_MAX_COUNT];
 } wifi_profile_snapshot_t;
 
-esp_err_t wifi_profile_store_init(void);
+esp_err_t wifi_profile_store_init(const char *admin_password);
 esp_err_t wifi_profile_store_get(wifi_profile_snapshot_t *snapshot);
+esp_err_t wifi_profile_store_get_password(uint32_t id, char *password,
+                                          size_t size);
+esp_err_t wifi_profile_store_reset(wifi_profile_snapshot_t *snapshot);
 
 esp_err_t wifi_profile_store_add(uint32_t expected_revision,
                                  const char *ssid, const char *password,

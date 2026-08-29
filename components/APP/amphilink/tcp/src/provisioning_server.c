@@ -36,6 +36,37 @@ static httpd_handle_t s_server;
 static provisioning_server_config_t s_config;
 static char s_auth_token[AUTH_TOKEN_HEX_SIZE + 1U];
 
+static void secure_zero(void *data, size_t size)
+{
+    volatile uint8_t *bytes = data;
+    while (size-- > 0U) {
+        *bytes++ = 0U;
+    }
+}
+
+static void clear_json_strings(cJSON *root)
+{
+    for (cJSON *item = root; item != NULL; item = item->next) {
+        if (item->child != NULL) {
+            clear_json_strings(item->child);
+        }
+        if (cJSON_IsString(item) && (item->valuestring != NULL)) {
+            secure_zero(item->valuestring, strlen(item->valuestring));
+        }
+    }
+}
+
+static void delete_sensitive_json(cJSON *root)
+{
+    clear_json_strings(root);
+    cJSON_Delete(root);
+}
+
+static void clear_snapshot(wifi_profile_snapshot_t *snapshot)
+{
+    secure_zero(snapshot, sizeof(*snapshot));
+}
+
 static const static_resource_t s_static_resources[] = {
     {"/", "index.html", "text/html; charset=utf-8", "no-store"},
     {"/app.v6.css", "app.v2.css", "text/css; charset=utf-8", "no-store"},
@@ -116,6 +147,23 @@ static esp_err_t send_json(httpd_req_t *request, const char *status,
     return err;
 }
 
+static esp_err_t send_sensitive_json(httpd_req_t *request, const char *status,
+                                     cJSON *root)
+{
+    char *body = cJSON_PrintUnformatted(root);
+    if (body == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    size_t body_size = strlen(body);
+    httpd_resp_set_status(request, status);
+    httpd_resp_set_type(request, "application/json; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    esp_err_t err = httpd_resp_send(request, body, body_size);
+    secure_zero(body, body_size);
+    cJSON_free(body);
+    return err;
+}
+
 static esp_err_t send_error(httpd_req_t *request, const char *status,
                             const char *code)
 {
@@ -181,6 +229,9 @@ static void generate_auth_token(void)
 
 static esp_err_t send_store_error(httpd_req_t *request, esp_err_t error)
 {
+    if (error == ESP_ERR_INVALID_CRC) {
+        return send_error(request, "423 Locked", "credentials_locked");
+    }
     if (error == ESP_ERR_NOT_FOUND) {
         return send_error(request, "404 Not Found", "not_found");
     }
@@ -210,12 +261,15 @@ static cJSON *receive_json(httpd_req_t *request)
         int result = httpd_req_recv(request, body + received,
                                     (size_t)request->content_len - received);
         if (result <= 0) {
+            secure_zero(body, sizeof(body));
             return NULL;
         }
         received += (size_t)result;
     }
     body[received] = '\0';
-    return cJSON_ParseWithLength(body, received);
+    cJSON *root = cJSON_ParseWithLength(body, received);
+    secure_zero(body, sizeof(body));
+    return root;
 }
 
 static bool json_uint32(cJSON *root, const char *name, uint32_t *value)
@@ -242,10 +296,10 @@ static esp_err_t login_post(httpd_req_t *request)
             : cJSON_GetObjectItemCaseSensitive(body, "password");
     if (!cJSON_IsString(password) ||
         (strcmp(password->valuestring, ADMIN_PASSWORD) != 0)) {
-        cJSON_Delete(body);
+        delete_sensitive_json(body);
         return send_error(request, "401 Unauthorized", "invalid_password");
     }
-    cJSON_Delete(body);
+    delete_sensitive_json(body);
 
     char cookie[96];
     snprintf(cookie, sizeof(cookie), "%s=%s; HttpOnly; SameSite=Strict; Path=/",
@@ -282,6 +336,7 @@ static void sync_manager(const wifi_profile_snapshot_t *snapshot)
                  snapshot->profiles[index].password);
     }
     (void)wifi_manager_set_credentials(credentials, snapshot->count);
+    secure_zero(credentials, sizeof(credentials));
 }
 
 static cJSON *snapshot_json(const wifi_profile_snapshot_t *snapshot)
@@ -290,13 +345,15 @@ static cJSON *snapshot_json(const wifi_profile_snapshot_t *snapshot)
     (void)wifi_manager_get_status(&status);
     cJSON *root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "revision", snapshot->revision);
+    cJSON_AddBoolToObject(root, "locked", snapshot->locked);
     cJSON *items = cJSON_AddArrayToObject(root, "items");
     for (size_t index = 0U; index < snapshot->count; ++index) {
         const wifi_profile_t *profile = &snapshot->profiles[index];
         cJSON *item = cJSON_CreateObject();
         cJSON_AddNumberToObject(item, "id", profile->id);
         cJSON_AddStringToObject(item, "ssid", profile->ssid);
-        cJSON_AddStringToObject(item, "password", profile->password);
+        cJSON_AddBoolToObject(item, "has_password",
+                              profile->password[0] != '\0');
         cJSON_AddNumberToObject(item, "priority", index);
         cJSON_AddBoolToObject(item, "connected",
                               (status.mode == WIFI_MANAGER_MODE_STA) &&
@@ -304,6 +361,16 @@ static cJSON *snapshot_json(const wifi_profile_snapshot_t *snapshot)
         cJSON_AddItemToArray(items, item);
     }
     return root;
+}
+
+static esp_err_t send_snapshot_json(httpd_req_t *request, const char *status,
+                                    wifi_profile_snapshot_t *snapshot)
+{
+    cJSON *root = snapshot_json(snapshot);
+    clear_snapshot(snapshot);
+    esp_err_t err = send_json(request, status, root);
+    cJSON_Delete(root);
+    return err;
 }
 
 static esp_err_t status_get(httpd_req_t *request)
@@ -355,14 +422,14 @@ static esp_err_t device_put(httpd_req_t *request)
         (body == NULL) ? NULL : cJSON_GetObjectItemCaseSensitive(body, "name");
     uint32_t id;
     if (!cJSON_IsString(name_item) || !json_uint32(body, "id", &id)) {
-        cJSON_Delete(body);
+        delete_sensitive_json(body);
         return send_error(request, "400 Bad Request", "invalid_json");
     }
 
     device_identity_t identity;
     esp_err_t err =
         device_identity_store_set(name_item->valuestring, id, &identity);
-    cJSON_Delete(body);
+    delete_sensitive_json(body);
     if (err == ESP_ERR_INVALID_ARG) {
         return send_error(request, "400 Bad Request", "invalid_identity");
     }
@@ -383,15 +450,80 @@ static esp_err_t device_put(httpd_req_t *request)
 static esp_err_t networks_get(httpd_req_t *request)
 {
     REQUIRE_AUTH(request);
-    wifi_profile_snapshot_t snapshot;
+    wifi_profile_snapshot_t snapshot = {0};
     esp_err_t err = wifi_profile_store_get(&snapshot);
     if (err != ESP_OK) {
         return send_store_error(request, err);
     }
-    cJSON *root = snapshot_json(&snapshot);
-    err = send_json(request, "200 OK", root);
-    cJSON_Delete(root);
+    return send_snapshot_json(request, "200 OK", &snapshot);
+}
+
+static bool password_uri_id(const char *uri, uint32_t *id)
+{
+    static const char prefix[] = "/api/v1/networks/";
+    static const char suffix[] = "/password";
+    if ((uri == NULL) || (strncmp(uri, prefix, sizeof(prefix) - 1U) != 0)) {
+        return false;
+    }
+    const char *value = uri + sizeof(prefix) - 1U;
+    char *end;
+    unsigned long converted = strtoul(value, &end, 10);
+    if ((converted == 0UL) || (converted > UINT32_MAX) ||
+        (strcmp(end, suffix) != 0)) {
+        return false;
+    }
+    *id = (uint32_t)converted;
+    return true;
+}
+
+static esp_err_t network_password_get(httpd_req_t *request)
+{
+    REQUIRE_AUTH(request);
+    uint32_t id;
+    if (!password_uri_id(request->uri, &id)) {
+        return send_error(request, "400 Bad Request", "invalid_id");
+    }
+    char password[WIFI_PROFILE_PASSWORD_SIZE] = {0};
+    esp_err_t err = wifi_profile_store_get_password(id, password,
+                                                     sizeof(password));
+    if (err != ESP_OK) {
+        secure_zero(password, sizeof(password));
+        return send_store_error(request, err);
+    }
+    cJSON *root = cJSON_CreateObject();
+    cJSON *item = (root == NULL)
+                      ? NULL
+                      : cJSON_AddStringToObject(root, "password", password);
+    secure_zero(password, sizeof(password));
+    if (item == NULL) {
+        cJSON_Delete(root);
+        return ESP_ERR_NO_MEM;
+    }
+    err = send_sensitive_json(request, "200 OK", root);
+    delete_sensitive_json(root);
     return err;
+}
+
+static esp_err_t networks_reset_post(httpd_req_t *request)
+{
+    REQUIRE_AUTH(request);
+    cJSON *body = receive_json(request);
+    cJSON *confirm = (body == NULL)
+                         ? NULL
+                         : cJSON_GetObjectItemCaseSensitive(body, "confirm");
+    if (!cJSON_IsTrue(confirm)) {
+        delete_sensitive_json(body);
+        return send_error(request, "400 Bad Request", "confirmation_required");
+    }
+    delete_sensitive_json(body);
+    wifi_profile_snapshot_t snapshot = {0};
+    esp_err_t err = wifi_profile_store_reset(&snapshot);
+    if (err != ESP_OK) {
+        clear_snapshot(&snapshot);
+        return send_store_error(request, err);
+    }
+    sync_manager(&snapshot);
+    return send_snapshot_json(request, "200 OK", &snapshot);
 }
 
 static esp_err_t networks_post(httpd_req_t *request)
@@ -403,20 +535,18 @@ static esp_err_t networks_post(httpd_req_t *request)
     uint32_t revision;
     if ((body == NULL) || !json_uint32(body, "revision", &revision) ||
         !json_profile(body, &ssid, &password)) {
-        cJSON_Delete(body);
+        delete_sensitive_json(body);
         return send_error(request, "400 Bad Request", "invalid_json");
     }
-    wifi_profile_snapshot_t snapshot;
+    wifi_profile_snapshot_t snapshot = {0};
     esp_err_t err = wifi_profile_store_add(revision, ssid, password, &snapshot);
-    cJSON_Delete(body);
+    delete_sensitive_json(body);
     if (err != ESP_OK) {
+        clear_snapshot(&snapshot);
         return send_store_error(request, err);
     }
     sync_manager(&snapshot);
-    cJSON *root = snapshot_json(&snapshot);
-    err = send_json(request, "201 Created", root);
-    cJSON_Delete(root);
-    return err;
+    return send_snapshot_json(request, "201 Created", &snapshot);
 }
 
 static bool uri_id(const char *uri, uint32_t *id)
@@ -440,26 +570,35 @@ static esp_err_t network_put(httpd_req_t *request)
     uint32_t id;
     cJSON *body = receive_json(request);
     const char *ssid;
-    const char *password;
+    const char *password = NULL;
     uint32_t revision;
+    cJSON *ssid_item =
+        (body == NULL) ? NULL : cJSON_GetObjectItemCaseSensitive(body, "ssid");
+    cJSON *password_item = (body == NULL)
+                               ? NULL
+                               : cJSON_GetObjectItemCaseSensitive(body,
+                                                                  "password");
     if (!uri_id(request->uri, &id) || (body == NULL) ||
         !json_uint32(body, "revision", &revision) ||
-        !json_profile(body, &ssid, &password)) {
-        cJSON_Delete(body);
+        !cJSON_IsString(ssid_item) ||
+        ((password_item != NULL) && !cJSON_IsString(password_item))) {
+        delete_sensitive_json(body);
         return send_error(request, "400 Bad Request", "invalid_json");
     }
-    wifi_profile_snapshot_t snapshot;
+    ssid = ssid_item->valuestring;
+    if (password_item != NULL) {
+        password = password_item->valuestring;
+    }
+    wifi_profile_snapshot_t snapshot = {0};
     esp_err_t err =
         wifi_profile_store_update(revision, id, ssid, password, &snapshot);
-    cJSON_Delete(body);
+    delete_sensitive_json(body);
     if (err != ESP_OK) {
+        clear_snapshot(&snapshot);
         return send_store_error(request, err);
     }
     sync_manager(&snapshot);
-    cJSON *root = snapshot_json(&snapshot);
-    err = send_json(request, "200 OK", root);
-    cJSON_Delete(root);
-    return err;
+    return send_snapshot_json(request, "200 OK", &snapshot);
 }
 
 static esp_err_t network_delete(httpd_req_t *request)
@@ -470,20 +609,18 @@ static esp_err_t network_delete(httpd_req_t *request)
     uint32_t revision;
     if (!uri_id(request->uri, &id) || (body == NULL) ||
         !json_uint32(body, "revision", &revision)) {
-        cJSON_Delete(body);
+        delete_sensitive_json(body);
         return send_error(request, "400 Bad Request", "invalid_json");
     }
-    wifi_profile_snapshot_t snapshot;
+    wifi_profile_snapshot_t snapshot = {0};
     esp_err_t err = wifi_profile_store_remove(revision, id, &snapshot);
-    cJSON_Delete(body);
+    delete_sensitive_json(body);
     if (err != ESP_OK) {
+        clear_snapshot(&snapshot);
         return send_store_error(request, err);
     }
     sync_manager(&snapshot);
-    cJSON *root = snapshot_json(&snapshot);
-    err = send_json(request, "200 OK", root);
-    cJSON_Delete(root);
-    return err;
+    return send_snapshot_json(request, "200 OK", &snapshot);
 }
 
 static esp_err_t order_put(httpd_req_t *request)
@@ -496,7 +633,7 @@ static esp_err_t order_put(httpd_req_t *request)
     if ((body == NULL) || !json_uint32(body, "revision", &revision) ||
         !cJSON_IsArray(ids) ||
         (cJSON_GetArraySize(ids) > WIFI_PROFILE_MAX_COUNT)) {
-        cJSON_Delete(body);
+        delete_sensitive_json(body);
         return send_error(request, "400 Bad Request", "invalid_json");
     }
     uint32_t ordered[WIFI_PROFILE_MAX_COUNT];
@@ -505,23 +642,21 @@ static esp_err_t order_put(httpd_req_t *request)
         cJSON *item = cJSON_GetArrayItem(ids, (int)index);
         if (!cJSON_IsNumber(item) || (item->valuedouble <= 0.0) ||
             (item->valuedouble > UINT32_MAX)) {
-            cJSON_Delete(body);
+            delete_sensitive_json(body);
             return send_error(request, "400 Bad Request", "invalid_json");
         }
         ordered[index] = (uint32_t)item->valuedouble;
     }
-    wifi_profile_snapshot_t snapshot;
+    wifi_profile_snapshot_t snapshot = {0};
     esp_err_t err =
         wifi_profile_store_reorder(revision, ordered, count, &snapshot);
-    cJSON_Delete(body);
+    delete_sensitive_json(body);
     if (err != ESP_OK) {
+        clear_snapshot(&snapshot);
         return send_store_error(request, err);
     }
     sync_manager(&snapshot);
-    cJSON *root = snapshot_json(&snapshot);
-    err = send_json(request, "200 OK", root);
-    cJSON_Delete(root);
-    return err;
+    return send_snapshot_json(request, "200 OK", &snapshot);
 }
 
 static esp_err_t scan_post(httpd_req_t *request)
@@ -558,7 +693,7 @@ static esp_err_t scan_get(httpd_req_t *request)
     cJSON_AddStringToObject(root, "state", operation_name(result.state));
     cJSON_AddNumberToObject(root, "error", result.error);
     cJSON *items = cJSON_AddArrayToObject(root, "items");
-    wifi_profile_snapshot_t snapshot;
+    wifi_profile_snapshot_t snapshot = {0};
     (void)wifi_profile_store_get(&snapshot);
     for (size_t index = 0U; index < result.count; ++index) {
         const wifi_manager_scan_record_t *record = &result.records[index];
@@ -579,6 +714,7 @@ static esp_err_t scan_get(httpd_req_t *request)
         cJSON_AddBoolToObject(item, "saved", saved);
         cJSON_AddItemToArray(items, item);
     }
+    clear_snapshot(&snapshot);
     esp_err_t err = send_json(request, "200 OK", root);
     cJSON_Delete(root);
     return err;
@@ -588,32 +724,84 @@ static esp_err_t connect_post(httpd_req_t *request)
 {
     REQUIRE_AUTH(request);
     cJSON *body = receive_json(request);
-    const char *ssid;
-    const char *password;
-    if ((body == NULL) || !json_profile(body, &ssid, &password) ||
-        (wifi_profile_validate(ssid, password) != ESP_OK)) {
-        cJSON_Delete(body);
+    if (body == NULL) {
         return send_error(request, "400 Bad Request", "invalid_profile");
     }
-    wifi_profile_snapshot_t snapshot;
-    (void)wifi_profile_store_get(&snapshot);
-    bool existing = false;
-    for (size_t index = 0U; index < snapshot.count; ++index) {
-        if (strcmp(snapshot.profiles[index].ssid, ssid) == 0) {
-            existing = true;
-            break;
-        }
+
+    wifi_profile_snapshot_t snapshot = {0};
+    esp_err_t err = wifi_profile_store_get(&snapshot);
+    if (err != ESP_OK) {
+        delete_sensitive_json(body);
+        clear_snapshot(&snapshot);
+        return send_store_error(request, err);
     }
-    if (!existing && (snapshot.count >= WIFI_PROFILE_MAX_COUNT)) {
-        cJSON_Delete(body);
-        return send_error(request, "409 Conflict", "profile_limit");
+    if (snapshot.locked) {
+        delete_sensitive_json(body);
+        clear_snapshot(&snapshot);
+        return send_error(request, "423 Locked", "credentials_locked");
     }
+
     wifi_manager_credential_t credential = {0};
-    snprintf(credential.ssid, sizeof(credential.ssid), "%s", ssid);
-    snprintf(credential.password, sizeof(credential.password), "%s", password);
+    uint32_t profile_id;
+    cJSON *profile_id_item =
+        cJSON_GetObjectItemCaseSensitive(body, "profile_id");
+    if (profile_id_item != NULL) {
+        if (!json_uint32(body, "profile_id", &profile_id) ||
+            (profile_id == 0U) ||
+            (cJSON_GetObjectItemCaseSensitive(body, "ssid") != NULL) ||
+            (cJSON_GetObjectItemCaseSensitive(body, "password") != NULL)) {
+            delete_sensitive_json(body);
+            clear_snapshot(&snapshot);
+            return send_error(request, "400 Bad Request", "invalid_profile");
+        }
+        const wifi_profile_t *profile = NULL;
+        for (size_t index = 0U; index < snapshot.count; ++index) {
+            if (snapshot.profiles[index].id == profile_id) {
+                profile = &snapshot.profiles[index];
+                break;
+            }
+        }
+        if (profile == NULL) {
+            delete_sensitive_json(body);
+            clear_snapshot(&snapshot);
+            return send_error(request, "404 Not Found", "not_found");
+        }
+        credential.id = profile->id;
+        snprintf(credential.ssid, sizeof(credential.ssid), "%s",
+                 profile->ssid);
+        snprintf(credential.password, sizeof(credential.password), "%s",
+                 profile->password);
+    } else {
+        const char *ssid;
+        const char *password;
+        if (!json_profile(body, &ssid, &password) ||
+            (wifi_profile_validate(ssid, password) != ESP_OK)) {
+            delete_sensitive_json(body);
+            clear_snapshot(&snapshot);
+            return send_error(request, "400 Bad Request", "invalid_profile");
+        }
+        bool existing = false;
+        for (size_t index = 0U; index < snapshot.count; ++index) {
+            if (strcmp(snapshot.profiles[index].ssid, ssid) == 0) {
+                existing = true;
+                break;
+            }
+        }
+        if (!existing && (snapshot.count >= WIFI_PROFILE_MAX_COUNT)) {
+            delete_sensitive_json(body);
+            clear_snapshot(&snapshot);
+            return send_error(request, "409 Conflict", "profile_limit");
+        }
+        snprintf(credential.ssid, sizeof(credential.ssid), "%s", ssid);
+        snprintf(credential.password, sizeof(credential.password), "%s",
+                 password);
+    }
+
+    clear_snapshot(&snapshot);
     uint32_t operation_id;
-    esp_err_t err = wifi_manager_connect_start(&credential, &operation_id);
-    cJSON_Delete(body);
+    err = wifi_manager_connect_start(&credential, &operation_id);
+    secure_zero(&credential, sizeof(credential));
+    delete_sensitive_json(body);
     if (err != ESP_OK) {
         return send_error(request, "409 Conflict", "operation_busy");
     }
@@ -714,7 +902,7 @@ esp_err_t provisioning_server_start(const provisioning_server_config_t *config)
     http_config.server_port = 80U;
     http_config.stack_size = 6144U;
     http_config.core_id = 0;
-    http_config.max_uri_handlers = 16U;
+    http_config.max_uri_handlers = 20U;
     http_config.lru_purge_enable = true;
     http_config.uri_match_fn = httpd_uri_match_wildcard;
     esp_err_t err = httpd_start(&s_server, &http_config);
@@ -740,7 +928,15 @@ esp_err_t provisioning_server_start(const provisioning_server_config_t *config)
         err = register_handler("/api/v1/networks", HTTP_POST, networks_post);
     }
     if (err == ESP_OK) {
+        err = register_handler("/api/v1/networks/reset", HTTP_POST,
+                               networks_reset_post);
+    }
+    if (err == ESP_OK) {
         err = register_handler("/api/v1/networks/order", HTTP_PUT, order_put);
+    }
+    if (err == ESP_OK) {
+        err = register_handler("/api/v1/networks/*", HTTP_GET,
+                               network_password_get);
     }
     if (err == ESP_OK) {
         err = register_handler("/api/v1/networks/*", HTTP_PUT, network_put);

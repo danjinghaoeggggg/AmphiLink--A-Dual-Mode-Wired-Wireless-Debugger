@@ -72,6 +72,11 @@
         <div><span class="section-index">02</span><h2 id="saved-title" data-i18n="savedNetworks">已保存网络</h2></div>
         <button id="add-network" class="command primary" type="button"><i data-icon="plus"></i><span data-i18n="addNetwork">添加网络</span></button>
       </div>
+      <div id="credentials-locked" class="locked-panel" hidden>
+        <span class="locked-mark"><i data-icon="lock"></i></span>
+        <div><strong data-i18n="credentialsLocked">Wi-Fi 凭据已锁定</strong><span data-i18n="credentialsLockedDetail">当前管理密码无法解密已保存的凭据。</span></div>
+        <button id="reset-networks" class="command danger" type="button"><i data-icon="trash"></i><span data-i18n="resetNetworks">清空并重新配置</span></button>
+      </div>
       <div id="saved-list" class="network-list" role="list"></div>
     </section>
 
@@ -114,7 +119,8 @@ PERFORMANCE OF THIS SOFTWARE.</pre>
       <div class="dialog-heading"><h2 id="profile-title"></h2><button class="icon-button dialog-close" type="button" aria-label="Close"><i data-icon="x"></i></button></div>
       <label><span>SSID</span><input id="profile-ssid" name="ssid" maxlength="32" autocomplete="off" required></label>
       <label><span data-i18n="password">密码</span><span class="password-input"><input id="profile-password" name="password" type="password" maxlength="63" autocomplete="new-password"><button id="dialog-eye" class="icon-button" type="button" aria-label="Show password"><i data-icon="eye"></i></button></span></label>
-      <p class="field-note" data-i18n="passwordRule">开放网络留空；加密网络需要 8–63 个字符</p>
+      <label class="check-row"><input id="profile-open" type="checkbox"><span data-i18n="openNetwork">开放网络</span></label>
+      <p id="profile-password-note" class="field-note" data-i18n="passwordRule">开放网络留空；加密网络需要 8–63 个字符</p>
       <div class="dialog-actions"><button class="command" value="cancel" type="button" id="profile-cancel" data-i18n="cancel">取消</button><button class="command primary" type="submit" data-i18n="save">保存</button></div>
     </form>
   </dialog>

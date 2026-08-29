@@ -184,11 +184,12 @@ API 基础路径为 `/api/v1`，请求和响应正文均为 JSON。响应使用 
 ```json
 {
   "revision":7,
+  "locked":false,
   "items":[
     {
       "id":3,
       "ssid":"Example-WiFi",
-      "password":"example-password",
+      "has_password":true,
       "priority":0,
       "connected":true
     }
@@ -196,7 +197,7 @@ API 基础路径为 `/api/v1`，请求和响应正文均为 JSON。响应使用 
 }
 ```
 
-`priority` 从 `0` 开始，数值越小，自动连接优先级越高。`id` 是稳定的配置标识，不等同于数组下标。为支持网页编辑，当前接口会在已认证响应中返回明文 Wi-Fi 密码；第三方客户端应避免记录或转发该字段。
+`priority` 从 `0` 开始，数值越小，自动连接优先级越高。`id` 是稳定的配置标识，不等同于数组下标。列表和修改响应不会返回密码；`has_password` 仅表示该网络是否需要密码。`locked` 表示当前管理密码无法解密已保存凭据，此时版本为 `0` 且列表为空。
 
 所有修改网络列表的请求都必须提交最近一次读取到的 `revision`。修改成功后响应包含递增后的版本；版本不匹配时返回 `409 Conflict` 和 `revision_conflict`，客户端应重新获取列表再合并用户操作。新增重复 SSID 或将现有配置改为另一个已保存的 SSID 时，当前固件也返回 `revision_conflict`。
 
@@ -205,10 +206,14 @@ SSID 必须是 1-32 字节的合法 UTF-8 字符串。密码为空字符串时�
 | 方法与路径 | 请求正文 | 成功状态 | 说明 |
 | --- | --- | --- | --- |
 | `GET /api/v1/networks` | 无 | `200 OK` | 获取网络列表 |
+| `GET /api/v1/networks/{id}/password` | 无 | `200 OK` | 获取单个网络的密码 |
 | `POST /api/v1/networks` | `{"revision":7,"ssid":"...","password":"..."}` | `201 Created` | 新增网络 |
-| `PUT /api/v1/networks/{id}` | `{"revision":7,"ssid":"...","password":"..."}` | `200 OK` | 修改指定网络 |
+| `PUT /api/v1/networks/{id}` | `{"revision":7,"ssid":"...","password":"..."}` | `200 OK` | 修改网络；省略密码表示保留原密码 |
 | `DELETE /api/v1/networks/{id}` | `{"revision":7}` | `200 OK` | 删除指定网络 |
 | `PUT /api/v1/networks/order` | `{"revision":7,"ids":[3,1,2]}` | `200 OK` | 按 ID 数组重排全部网络 |
+| `POST /api/v1/networks/reset` | `{"confirm":true}` | `200 OK` | 擦除全部凭据并解除锁定 |
+
+单项密码接口返回`{"password":"..."}`；开放网络返回空字符串。该接口与表中的其他网络接口都要求有效登录Cookie，并使用`Cache-Control: no-store`。重置接口用于`locked`状态，只有显式提交`confirm:true`才会擦除原密文并创建空的`profiles_v2`存储。
 
 重排请求中的 `ids` 必须完整、无重复地列出当前全部网络 ID。
 
@@ -254,7 +259,7 @@ SSID 必须是 1-32 字节的合法 UTF-8 字符串。密码为空字符串时�
    {"ssid":"Example-WiFi","password":"example-password"}
    ```
 
-   成功接受操作时返回 `202 Accepted` 和 `operation_id`。该调用会主动断开当前 TCP 调试客户端。
+   已保存网络应改用 `{"profile_id":3}`，避免把密码返回给客户端。成功接受操作时返回 `202 Accepted` 和 `operation_id`。该调用会主动断开当前 TCP 调试客户端。
 
 2. 在网络仍可访问时轮询 `GET /api/v1/connect/{operation_id}`：
 
@@ -288,6 +293,7 @@ SSID 必须是 1-32 字节的合法 UTF-8 字符串。密码为空字符串时�
 | `400 Bad Request` | `invalid_id` | 路径中的操作 ID 不合法 |
 | `401 Unauthorized` | `invalid_password` | 登录密码错误 |
 | `401 Unauthorized` | `unauthorized` | 未提供有效会话 Cookie |
+| `423 Locked` | `credentials_locked` | 当前管理密码无法解密已保存的 Wi-Fi 凭据 |
 | `404 Not Found` | `not_found` | 配置项、异步操作或资源不存在 |
 | `409 Conflict` | `revision_conflict` | 网络列表版本冲突 |
 | `409 Conflict` | `profile_limit` | 已达到 10 个网络的上限 |
@@ -481,11 +487,12 @@ The device stores up to 10 Wi-Fi profiles. Network-list responses use the follow
 ```json
 {
   "revision":7,
+  "locked":false,
   "items":[
     {
       "id":3,
       "ssid":"Example-WiFi",
-      "password":"example-password",
+      "has_password":true,
       "priority":0,
       "connected":true
     }
@@ -493,7 +500,7 @@ The device stores up to 10 Wi-Fi profiles. Network-list responses use the follow
 }
 ```
 
-`priority` starts at `0`; a lower value indicates a higher automatic connection priority. `id` is a stable profile identifier and is not an array index. To support editing in the web interface, authenticated responses currently include Wi-Fi passwords in plaintext. Third-party clients should not log or forward these values.
+`priority` starts at `0`; a lower value indicates a higher automatic connection priority. `id` is a stable profile identifier and is not an array index. List and mutation responses never contain passwords; `has_password` only indicates whether a password is configured. When `locked` is true, the current admin password cannot decrypt the saved credentials, the revision is `0`, and the list is empty.
 
 Every request that modifies the network list must include the most recently retrieved `revision`. A successful modification returns an incremented revision. If the revision does not match, the device returns `409 Conflict` with `revision_conflict`; the client should retrieve the list again and merge the user's changes. The current firmware also returns `revision_conflict` when adding a duplicate SSID or changing an existing profile to an SSID that is already saved.
 
@@ -502,10 +509,14 @@ An SSID must be a valid UTF-8 string from 1 through 32 bytes. An empty password 
 | Method and path | Request body | Success status | Description |
 | --- | --- | --- | --- |
 | `GET /api/v1/networks` | None | `200 OK` | Retrieve the network list |
+| `GET /api/v1/networks/{id}/password` | None | `200 OK` | Retrieve one network password |
 | `POST /api/v1/networks` | `{"revision":7,"ssid":"...","password":"..."}` | `201 Created` | Add a network |
-| `PUT /api/v1/networks/{id}` | `{"revision":7,"ssid":"...","password":"..."}` | `200 OK` | Update the specified network |
+| `PUT /api/v1/networks/{id}` | `{"revision":7,"ssid":"...","password":"..."}` | `200 OK` | Update a network; omit the password to retain it |
 | `DELETE /api/v1/networks/{id}` | `{"revision":7}` | `200 OK` | Delete the specified network |
 | `PUT /api/v1/networks/order` | `{"revision":7,"ids":[3,1,2]}` | `200 OK` | Reorder all networks using an array of IDs |
+| `POST /api/v1/networks/reset` | `{"confirm":true}` | `200 OK` | Erase all credentials and clear the locked state |
+
+The single-password endpoint returns `{"password":"..."}`; an open network returns an empty string. This endpoint and the other network endpoints in the table require a valid login cookie and use `Cache-Control: no-store`. The reset endpoint is intended for the `locked` state and erases the original ciphertext and creates an empty `profiles_v2` store only when `confirm:true` is explicitly supplied.
 
 The `ids` array in a reorder request must list every current network ID exactly once.
 
@@ -551,7 +562,7 @@ Network switching also uses an asynchronous operation model.
    {"ssid":"Example-WiFi","password":"example-password"}
    ```
 
-   When the operation is accepted, the service returns `202 Accepted` with an `operation_id`. This request actively disconnects the current TCP debug client.
+   For a saved network, use `{"profile_id":3}` so the password never needs to be returned to the client. When the operation is accepted, the service returns `202 Accepted` with an `operation_id`. This request actively disconnects the current TCP debug client.
 
 2. While the device remains reachable, poll `GET /api/v1/connect/{operation_id}`:
 
@@ -585,6 +596,7 @@ Common error codes are listed below:
 | `400 Bad Request` | `invalid_id` | Operation ID in the path is invalid |
 | `401 Unauthorized` | `invalid_password` | Login password is incorrect |
 | `401 Unauthorized` | `unauthorized` | A valid session cookie was not provided |
+| `423 Locked` | `credentials_locked` | The current admin password cannot decrypt the saved Wi-Fi credentials |
 | `404 Not Found` | `not_found` | Configuration item, asynchronous operation, or resource does not exist |
 | `409 Conflict` | `revision_conflict` | Network-list revision conflict |
 | `409 Conflict` | `profile_limit` | The limit of 10 network profiles has been reached |

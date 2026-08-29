@@ -84,6 +84,12 @@ main { max-width: 1120px; margin: auto; padding: 10px 24px 56px; }
 .color-option.light .color-swatch { border-color: #8e9996; }
 .identity-save { height: 44px; }
 .network-list { border-top: 1px solid var(--line); }
+.locked-panel { min-height: 78px; padding: 14px 16px; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 12px; border: 1px solid #d7aaa2; border-radius: 6px; background: #fff7f5; }
+.locked-mark { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 5px; color: var(--danger); background: #fae9e7; }
+.locked-mark svg { width: 19px; height: 19px; }
+.locked-panel > div { min-width: 0; display: grid; gap: 4px; }
+.locked-panel strong { font-size: 14px; }
+.locked-panel div span { color: var(--muted); font-size: 12px; }
 .network-row { min-height: 68px; display: grid; grid-template-columns: 34px minmax(150px, 1.4fr) minmax(140px, 1fr) auto; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); background: transparent; }
 .network-row.dragging { opacity: .45; }
 .network-row.drop-target { box-shadow: inset 0 2px var(--teal); }
@@ -130,6 +136,8 @@ input { width: 100%; height: 44px; padding: 0 12px; border: 1px solid #adbbb6; b
 .password-input input { padding-right: 45px; }
 .password-input .icon-button { position: absolute; right: 2px; top: 2px; }
 .field-note { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.check-row { grid-template-columns: 18px 1fr; align-items: center; gap: 8px; }
+.check-row input { width: 18px; height: 18px; padding: 0; accent-color: var(--teal); }
 .dialog-actions { margin-top: 24px; display: flex; justify-content: flex-end; gap: 8px; }
 .selected-network { min-height: 54px; padding: 10px 12px; display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 5px; background: #f5f8f6; }
 .selected-network svg { width: 19px; height: 19px; color: var(--teal); }
@@ -159,6 +167,8 @@ input { width: 100%; height: 44px; padding: 0 12px; border: 1px solid #adbbb6; b
   .section-heading { flex-wrap: wrap; }
   .section-heading > .command { margin-left: auto; }
   .network-row { min-height: 82px; grid-template-columns: 28px minmax(0, 1fr); gap: 6px; }
+  .locked-panel { grid-template-columns: 38px minmax(0, 1fr); }
+  .locked-panel .command { grid-column: 1 / -1; justify-self: end; }
   .password-cell { grid-column: 2; font-size: 12px; }
   .row-actions { grid-column: 1 / -1; justify-content: flex-end; }
   .scan-list { grid-template-columns: 1fr; }

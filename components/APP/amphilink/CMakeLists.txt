@@ -24,6 +24,7 @@ idf_component_register(
         esp_hw_support
         flash
         freertos
+        mbedtls
         network
         nvs_flash
         sw3

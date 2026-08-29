@@ -188,6 +188,10 @@ ssid,data,string,YourWiFiSSID
 password,data,string,YourWiFiPassword
 ```
 
+CSV镜像只用于首次预置，其中的Wi-Fi密码仍是明文，必须按敏感文件保护。设备首次启动后会先生成仅含密文的掉电恢复副本，再擦除整个`wifi_nvs`分区，并写入设备绑定的`profiles_v2`格式。该格式使用100,000次PBKDF2-HMAC-SHA-256，从`ADMIN_PASSWORD`、16字节随机盐和STA MAC派生256位密钥；完整配置载荷通过AES-256-GCM加密，每次写入使用新的12字节随机nonce和16字节认证标签，格式头作为AAD参与认证。旧固件生成的`profiles_v1`不会迁移，升级后会被擦除并要求重新配置。
+
+正常运行时，网络列表和修改接口不会返回密码；登录会话只能按网络ID单独读取。若重新编译固件并更换`ADMIN_PASSWORD`，原密文会保持不变且存储进入锁定状态，设备使用配置热点启动。管理员登录后必须明确清空旧凭据并重新配置。此机制保护单独提取的`wifi_nvs`，但不替代HTTPS、Secure Boot或Flash Encryption。
+
 `identity_nvs.csv`用于预置设备名称和颜色ID，名称应为1-32个可打印ASCII字符，ID取值范围为1-10。文件格式如下：
 
 ```csv
@@ -465,6 +469,10 @@ wifi,namespace,,
 ssid,data,string,YourWiFiSSID
 password,data,string,YourWiFiPassword
 ```
+
+The CSV image is only an initial provisioning format and still contains the Wi-Fi password in plaintext, so it must be handled as a sensitive file. On first boot, the device creates a ciphertext-only recovery copy, erases the complete `wifi_nvs` partition, and writes the device-bound `profiles_v2` format. It derives a 256-bit key from `ADMIN_PASSWORD`, a 16-byte random salt, and the STA MAC using 100,000 iterations of PBKDF2-HMAC-SHA-256. The complete profile payload is encrypted with AES-256-GCM using a fresh 12-byte random nonce and a 16-byte authentication tag on every write, with the format header authenticated as AAD. Legacy `profiles_v1` data is not migrated; upgrading erases it and requires the networks to be configured again.
+
+During normal operation, network-list and mutation responses never contain passwords; an authenticated session can retrieve only one password at a time by network ID. Rebuilding with a different `ADMIN_PASSWORD` leaves the old ciphertext untouched and locks the store, so the device starts its setup access point. After signing in, the administrator must explicitly erase the old credentials and reconfigure them. This protects a separately extracted `wifi_nvs` partition, but does not replace HTTPS, Secure Boot, or Flash Encryption.
 
 `identity_nvs.csv` provisions the device name and color ID. The name must contain 1-32 printable ASCII characters, and the ID must be in the range 1-10. Use the following format:
 

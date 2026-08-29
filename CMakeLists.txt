@@ -10,5 +10,7 @@ set(COMPONENT_DIRS
     "${CMAKE_CURRENT_LIST_DIR}/components/APP"
 )
 
+set(PROJECT_VER "1.1.0")
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(AmphiLink)

@@ -83,9 +83,12 @@ esp_err_t flash_user_nvs_set_string(const char *namespace_name, const char *key,
 esp_err_t flash_user_nvs_get_string(const char *namespace_name, const char *key,
                                     char *value, size_t size,
                                     size_t *bytes_read);
+esp_err_t flash_user_nvs_erase_key(const char *namespace_name,
+                                   const char *key);
 
 esp_err_t flash_user_nvs_partition_init(const char *partition_label,
                                         bool erase_on_init_error);
+esp_err_t flash_user_nvs_partition_erase(const char *partition_label);
 esp_err_t flash_user_nvs_partition_set_blob(const char *partition_label,
                                             const char *namespace_name,
                                             const char *key, const void *data,
