@@ -23,12 +23,17 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Build firmware
+      - name: Build all firmware variants
         shell: bash
         run: |
           source /opt/esp/idf/export.sh
-          idf.py set-target esp32s3
-          idf.py build
+          for variant in no-psram quad-psram octal-psram; do
+            build_dir="build-${variant}"
+            idf.py -B "${build_dir}" \
+              -D SDKCONFIG="$PWD/${build_dir}/sdkconfig" \
+              -D SDKCONFIG_DEFAULTS="$PWD/sdkconfig.${variant}" \
+              build
+          done
 
       - name: Prepare release assets and notes
         shell: bash
@@ -37,47 +42,102 @@ jobs:
         run: |
           python3 - <<'PY'
           import json
+          import os
           import shlex
           import shutil
           from pathlib import Path
 
-          build_dir = Path("build")
-          assets_dir = Path("release-assets")
-          assets_dir.mkdir(exist_ok=True)
-
-          flasher_path = build_dir / "flasher_args.json"
-          flasher = json.loads(flasher_path.read_text(encoding="utf-8"))
-          flash_files = flasher.get("flash_files", {})
-          if not flash_files:
-              raise SystemExit("build/flasher_args.json contains no flash files")
-
-          entries = []
-          used_names = set()
-          for offset, relative_path in sorted(
-              flash_files.items(), key=lambda item: int(item[0], 0)
-          ):
-              source = build_dir / relative_path
-              if not source.is_file():
-                  raise SystemExit(f"Missing build output: {source}")
-
-              name = Path(relative_path).name
-              if name in used_names:
-                  raise SystemExit(f"Duplicate release asset name: {name}")
-              used_names.add(name)
-              shutil.copy2(source, assets_dir / name)
-              entries.append((offset, name, relative_path))
-
-          (assets_dir / "flash-manifest.json").write_text(
-              json.dumps(
-                  [
-                      {"offset": offset, "asset": name, "build_path": relative}
-                      for offset, name, relative in entries
-                  ],
-                  indent=2,
-              )
-              + "\n",
-              encoding="utf-8",
+          variants = (
+              ("no-psram", "无 PSRAM / No PSRAM", "型号中没有 R 容量后缀 / Module name has no R capacity suffix"),
+              ("quad-psram", "Quad PSRAM", "R2 模组 / R2 modules"),
+              ("octal-psram", "Octal PSRAM", "R8、R16V 模组 / R8 and R16V modules"),
           )
+          assets_dir = Path("release-assets")
+          if assets_dir.exists():
+              shutil.rmtree(assets_dir)
+          assets_dir.mkdir()
+
+          release_sections = []
+          used_names = set()
+          for variant, title, hardware_hint in variants:
+              build_dir = Path(f"build-{variant}")
+              flasher_path = build_dir / "flasher_args.json"
+              flasher = json.loads(flasher_path.read_text(encoding="utf-8"))
+              flash_files = flasher.get("flash_files", {})
+              if not flash_files:
+                  raise SystemExit(f"{flasher_path} contains no flash files")
+
+              entries = []
+              for offset, relative_path in sorted(
+                  flash_files.items(), key=lambda item: int(item[0], 0)
+              ):
+                  source = build_dir / relative_path
+                  if not source.is_file():
+                      raise SystemExit(f"Missing build output: {source}")
+
+                  asset_name = f"{variant}-{Path(relative_path).name}"
+                  if asset_name in used_names:
+                      raise SystemExit(f"Duplicate release asset name: {asset_name}")
+                  used_names.add(asset_name)
+                  shutil.copy2(source, assets_dir / asset_name)
+                  entries.append((offset, asset_name, relative_path))
+
+              manifest_name = f"{variant}-flash-manifest.json"
+              if manifest_name in used_names:
+                  raise SystemExit(f"Duplicate release asset name: {manifest_name}")
+              used_names.add(manifest_name)
+              (assets_dir / manifest_name).write_text(
+                  json.dumps(
+                      [
+                          {
+                              "offset": offset,
+                              "asset": asset_name,
+                              "build_path": relative_path,
+                          }
+                          for offset, asset_name, relative_path in entries
+                      ],
+                      indent=2,
+                  )
+                  + "\n",
+                  encoding="utf-8",
+              )
+
+              flash_args = [str(value) for value in flasher.get("write_flash_args", [])]
+              extra_args = flasher.get("extra_esptool_args", {})
+              command_args = ["esptool.py", "--chip", extra_args.get("chip", "esp32s3")]
+              for key in ("before", "after"):
+                  if extra_args.get(key):
+                      command_args.extend([f"--{key}", str(extra_args[key])])
+              command_args.extend(flash_args)
+              command_args.append("write-flash")
+              for offset, asset_name, _ in entries:
+                  command_args.extend([offset, asset_name])
+              flash_command = " ".join(shlex.quote(argument) for argument in command_args)
+
+              table = [
+                  "| Flash 偏移 / Flash offset | Release 资产 / Release asset | 构建路径 / Build path |",
+                  "| --- | --- | --- |",
+              ]
+              table.extend(
+                  f"| `{offset}` | `{asset_name}` | `{relative_path}` |"
+                  for offset, asset_name, relative_path in entries
+              )
+              release_sections.extend(
+                  [
+                      f"### {title} (`{variant}`)",
+                      "",
+                      f"适用硬件 / Hardware: {hardware_hint}",
+                      "",
+                      *table,
+                      "",
+                      f"Manifest: `{manifest_name}`",
+                      "",
+                      "```bash",
+                      flash_command,
+                      "```",
+                      "",
+                  ]
+              )
 
           changelog_lines = Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
           heading_index = next(
@@ -96,45 +156,18 @@ jobs:
           )
           changelog_section = "\n".join(changelog_lines[heading_index + 1:next_heading]).strip()
 
-          flash_args = [str(value) for value in flasher.get("write_flash_args", [])]
-          extra_args = flasher.get("extra_esptool_args", {})
-          command_args = ["esptool.py", "--chip", extra_args.get("chip", "esp32s3")]
-          for key in ("before", "after"):
-              if extra_args.get(key):
-                  command_args.extend([f"--{key}", str(extra_args[key])])
-          command_args.extend(flash_args)
-          command_args.append("write-flash")
-          for offset, name, _ in entries:
-              command_args.extend([offset, name])
-          flash_command = " ".join(shlex.quote(argument) for argument in command_args)
-
-          table = [
-              "| Flash 偏移 / Flash offset | Release 资产 / Release asset | 构建路径 / Build path |",
-              "| --- | --- | --- |",
-          ]
-          table.extend(
-              f"| `{offset}` | `{name}` | `{relative}` |"
-              for offset, name, relative in entries
-          )
           notes = "\n".join(
               [
                   changelog_section,
                   "",
-                  "## 烧录 / Flashing",
+                  "## 固件选择与烧录 / Firmware selection and flashing",
                   "",
-                  "请根据下表中的 Flash 地址选择对应的镜像文件进行烧录。 / Use the image files and Flash offsets listed in the table below.",
+                  "请只使用与目标模组 PSRAM 类型匹配的一整套镜像，不要混用不同版本的文件。 / Use the complete image set matching the target module's PSRAM type; do not mix files from different variants.",
                   "",
-                  *table,
-                  "",
-                  "如果使用命令行，请在下载的镜像文件所在目录执行： / For command-line flashing, run this from the directory containing the downloaded images:",
-                  "",
-                  "```bash",
-                  flash_command,
-                  "```",
-                  "",
+                  *release_sections,
                   "你也可以使用 [esp.eterill.xyz](https://esp.eterill.xyz/) 网页烧录工具进行烧录。 / You can also flash the firmware with the [esp.eterill.xyz](https://esp.eterill.xyz/) web flasher.",
                   "",
-                  f"构建提交 / Build commit: `{__import__('os').environ['COMMIT_SHA']}`",
+                  f"构建提交 / Build commit: `{os.environ['COMMIT_SHA']}`",
                   "",
                   "此预发布版本由 GitHub Actions 自动构建并发布。 / This pre-release was automatically built and published by GitHub Actions.",
               ]
