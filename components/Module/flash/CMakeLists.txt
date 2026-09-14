@@ -6,11 +6,8 @@ idf_component_register(
     REQUIRES
         esp_common
     PRIV_REQUIRES
-        BSP
         fatfs
         freertos
         log
         nvs_flash
-        spiffs
-        wear_levelling
 )

@@ -1027,8 +1027,7 @@ static esp_err_t static_get(httpd_req_t *request)
         return send_error(request, "404 Not Found", "not_found");
     }
     size_t file_size;
-    if (flash_user_file_get_size(FLASH_USER_PARTITION_WEBPAGE_VFS,
-                                 resource->path, &file_size) != ESP_OK) {
+    if (flash_user_webpage_get_size(resource->path, &file_size) != ESP_OK) {
         return send_error(request, "503 Service Unavailable",
                           "web_assets_missing");
     }
@@ -1037,10 +1036,8 @@ static esp_err_t static_get(httpd_req_t *request)
     uint8_t chunk[STATIC_CHUNK_SIZE];
     for (size_t offset = 0U; offset < file_size;) {
         size_t bytes_read;
-        esp_err_t err =
-            flash_user_file_read_at(FLASH_USER_PARTITION_WEBPAGE_VFS,
-                                    resource->path, offset, chunk,
-                                    sizeof(chunk), &bytes_read);
+        esp_err_t err = flash_user_webpage_read_at(
+            resource->path, offset, chunk, sizeof(chunk), &bytes_read);
         if ((err != ESP_OK) || (bytes_read == 0U)) {
             (void)httpd_resp_send_chunk(request, NULL, 0);
             return ESP_FAIL;

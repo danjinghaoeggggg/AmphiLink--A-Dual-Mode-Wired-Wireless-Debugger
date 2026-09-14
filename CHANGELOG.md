@@ -2,6 +2,30 @@
 
 本文件记录 AmphiLink 的重要功能和行为变更。
 
+## 1.2.0 - 2026-9-14
+
+### 硬件兼容性
+
+- 新增无 PSRAM、Quad PSRAM 80 MHz、Octal PSRAM 40 MHz 三套 ESP32-S3
+  构建配置；所有配置以 2 MiB Flash 为基线，容量更大的模组可直接使用。
+- 三套配置均启用 Flash Quad/Octal 自动检测；Octal PSRAM 使用较保守的
+  40 MHz 以增加时序余量。文档补充按模组容量后缀选择固件以及 R16V
+  GPIO47/48 的 1.8 V 限制。
+
+### 分区与存储
+
+- 删除 OTA 布局以及未使用的 `vfs`、`storage`、`phy_init` 分区，改为单一
+  `factory` 应用和只读 `webpage_vfs` 的 2 MiB 分区表。
+- 保留三个 NVS 分区及应用的原偏移，网页分区移动到 `0x1E0000`；从旧布局
+  升级时必须同步烧录新分区表和网页镜像。
+- 精简 Flash 模块为实际使用的 NVS 和只读网页接口，删除未使用的文件系统 API、
+  SPIFFS/wear-levelling 组件依赖及 BSP Flash 包装层。
+
+### 验证
+
+- 使用 ESP-IDF 6.0.2 从独立空构建目录通过 no-PSRAM、Quad-PSRAM 和
+  Octal-PSRAM 三套完整构建；应用镜像均小于 1 MiB。
+
 ## 1.1.0 - 2026-08-29
 
 ### 安全性

@@ -4,11 +4,11 @@
 
 ## 简介
 
-AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过原生USB进行有线调试，也支持通过Wi-Fi和TCP进行无线调试（支持通过较新版本OpenOCD原生TCP协议驱动，电脑端无需额外硬件）。目前项目提供SWD调试，可使用常见的ESP32-S3 N16R8开发板快速搭建。
+AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过原生USB进行有线调试，也支持通过Wi-Fi和TCP进行无线调试（支持通过较新版本OpenOCD原生TCP协议驱动，电脑端无需额外硬件）。目前项目提供SWD调试，并提供无PSRAM、Quad PSRAM和Octal PSRAM三套固件配置，可覆盖Flash容量不小于2 MiB的常见ESP32-S3官方模组。
 
 ## 特点
 
-- 简单的硬件：一块常见的ESP32-S3 N16R8开发板
+- 简单的硬件：一块Flash容量不小于2 MiB的常见ESP32-S3开发板
 - 方便的连接：电脑上无需连接额外的硬件
 - 较高调试速率：核心程序采用直接访问寄存器写法以支持更快的调试速率
 - 完整的配套软件：使用配套的VS Code扩展AmphiLink CFG Tool可快速方便地使用本调试器
@@ -18,7 +18,7 @@ AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过
 
 ### 硬件准备
 
-完全可以使用一块常见且便于购买的成品ESP32-S3 N16R8开发板当作应用本项目的主要硬件，如果希望自制硬件可参考 [硬件设计说明](#硬件设计说明)。
+可以使用常见且便于购买的成品ESP32-S3开发板作为本项目的主要硬件。请根据模组的PSRAM类型选择对应固件。如果希望自制硬件可参考[硬件设计说明](#硬件设计说明)。
 
 **需要注意的是：如果需要使用无线模式，请确保您的硬件上有板载2.4 GHz天线或者连接了外置2.4 GHz天线，否则可能引起芯片或模组发烫。如果您的硬件没有合适的天线，建议您仔细阅读下文中模式选择部分，否则可能因误操作而损坏芯片。**
 
@@ -60,6 +60,8 @@ AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过
    **如果您使用的硬件没有合适的天线，请确保其不会进入无线模式，否则可能会引起芯片或模组发烫甚至损坏。建议始终保持GPIO7低电平（默认情况下）以免某些情况下（如一些特定方式烧录完成后）自动复位后选择并进入了错误的模式。**
 
 4. 如果希望使用其他自定义的引脚，可以通过更改[bsp_pin_config.h](components/BSP/inc/bsp_pin_config.h)来完成。
+
+    **需要注意的是：R16V器件的GPIO47和GPIO48位于1.8 V电压域。** 默认`BSP_PIN_RMT_TX=48`不能直接按普通3.3 V GPIO连接；使用这类模组时应改用兼容引脚，或增加合适的电平转换并确认开发板原理图。
 
 ### 连接
 
@@ -141,6 +143,47 @@ AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过
 
 ## 面向开发者
 
+### 构建配置与模组选择
+
+工程使用ESP-IDF 6.0.2验证，统一采用[2 MiB分区表](partition-2MiB.csv)；容量更大的Flash也只使用前2 MiB。根据模组丝印或数据手册选择配置：
+
+| PSRAM硬件 | 常见模组后缀 | sdkconfig配置 | 构建目录 |
+| --- | --- | --- | --- |
+| 无PSRAM | 型号中没有`R`容量后缀 | `sdkconfig.no-psram` | `build-no-psram` |
+| Quad PSRAM | `R2` | `sdkconfig.quad-psram` | `build-quad-psram` |
+| Octal PSRAM | `R8`、`R16V` | `sdkconfig.octal-psram` | `build-octal-psram` |
+
+如果型号命名不符合上表，请以数据手册中的PSRAM总线类型为准。三种PSRAM驱动是互斥的编译期选项，固件不能在启动时自动跨Quad/Octal切换。三套配置均启用ESP-IDF的Flash Quad/Octal自动检测；QIO作为Quad Flash的基准模式，检测到Octal Flash时自动切换到OPI STR。Octal PSRAM当前采用较保守的40 MHz以增加不同模组和板级信号质量下的时序余量，硬件条件满足时也可使用80 MHz。Flash自动检测不保证高级特性，本工程仅使用基础读写和前2 MiB空间。
+
+从干净且互不污染的配置分别构建：
+
+```bash
+idf.py -B build-no-psram \
+  -D SDKCONFIG="$PWD/build-no-psram/sdkconfig" \
+  -D SDKCONFIG_DEFAULTS="$PWD/sdkconfig.no-psram" build
+
+idf.py -B build-quad-psram \
+  -D SDKCONFIG="$PWD/build-quad-psram/sdkconfig" \
+  -D SDKCONFIG_DEFAULTS="$PWD/sdkconfig.quad-psram" build
+
+idf.py -B build-octal-psram \
+  -D SDKCONFIG="$PWD/build-octal-psram/sdkconfig" \
+  -D SDKCONFIG_DEFAULTS="$PWD/sdkconfig.octal-psram" build
+```
+
+构建后可用`idf.py -B <对应构建目录> flash`烧录。直接执行`idf.py build`时，顶层`CMakeLists.txt`当前默认选择`sdkconfig.octal-psram`。如需快速切换默认配置，请在下列代码中只保留一个未注释的`set(SDKCONFIG_DEFAULTS ...)`：
+
+```cmake
+if(NOT DEFINED SDKCONFIG_DEFAULTS AND "$ENV{SDKCONFIG_DEFAULTS}" STREQUAL "")
+    # choose one of the following sdkconfig files to use as default by uncommenting it and commenting the others
+    set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.octal-psram")
+    # set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.no-psram")
+    # set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.quad-psram")
+endif()
+```
+
+切换配置时不要复用另一配置的构建目录或其中生成的`sdkconfig`。修改默认配置后，如果根目录已有旧`sdkconfig`或`build/`，需先备份自定义项并删除它们，再执行`idf.py build`；否则ESP-IDF会继续优先使用旧配置。命令行或环境变量显式设置的`SDKCONFIG_DEFAULTS`优先于上述默认值。
+
 ### 基础可配置项
 
 更改本项目中一些编译期宏可以快速对本项目进行一些自定义化配置，详细说明如下：
@@ -162,10 +205,10 @@ UDP发现、TCP帧、USB传输和配置网页HTTP API的完整定义请参考[�
 ```text
 main/                              # 程序入口和固件镜像构建配置
 components/
-├── BSP/                           # ESP32-S3 GPIO、ADC、Flash、USB PHY和RMT等板级能力
+├── BSP/                           # ESP32-S3 GPIO、ADC、USB PHY、UART和RMT等板级能力
 ├── Module/
 │   ├── DAP/                       # CMSIS-DAP核心、SWD时序和硬件适配
-│   ├── flash/                     # NVS、FATFS和SPIFFS存储管理
+│   ├── flash/                     # NVS与只读网页FATFS存储管理
 │   ├── network/                   # Wi-Fi管理、多实例TCP服务器和UDP广播
 │   ├── serial/                    # UART-over-TCP无线串口桥接
 │   ├── sw3/                       # 两档/三档模式选择输入
@@ -223,7 +266,7 @@ id,data,u8,1
 
 1. 随工程构建和烧录
 
-   将一个或两个CSV文件放置在工程根目录后重新构建工程。构建系统会生成`build/wifi_nvs.bin`和/或`build/identity_nvs.bin`，并在执行`idf.py flash`时自动写入对应分区。未提供某个CSV文件时，不会生成或烧录对应的预置镜像；其中未预置设备标识时，固件使用默认名称`AmphiLink`和默认ID `1`。
+   将一个或两个CSV文件放置在工程根目录后重新构建工程。构建系统会在所选构建目录中生成`wifi_nvs.bin`和/或`identity_nvs.bin`，并在执行`idf.py -B <对应构建目录> flash`时自动写入对应分区。未提供某个CSV文件时，不会生成或烧录对应的预置镜像；其中未预置设备标识时，固件使用默认名称`AmphiLink`和默认ID `1`。
 
 2. 不使用ESP-IDF，单独生成和烧录
 
@@ -239,7 +282,7 @@ id,data,u8,1
      identity_nvs.csv identity_nvs.bin 0x3000
    ```
 
-   生成后可使用支持指定Flash偏移的烧录工具或其他工具单独烧录。按当前[分区表](partition-16MiB.csv)，镜像与烧录参数如下：
+   生成后可使用支持指定Flash偏移的烧录工具或其他工具单独烧录。按当前[分区表](partition-2MiB.csv)，镜像与烧录参数如下：
 
    | 镜像 | 分区大小 | Flash偏移 |
    | --- | --- | --- |
@@ -263,7 +306,7 @@ id,data,u8,1
 | 模式选择 | GPIO7 | `BSP_PIN_MODESEL` | 是 | 仅两档或三档选择模式需要；强制模式不使用该引脚 |
 | Connected状态灯 | GPIO42 | `BSP_PIN_STATUS_CONNECTED_LED` | 是 | 可选，高电平点亮；普通LED需要串联限流电阻 |
 | Running状态灯 | GPIO41 | `BSP_PIN_STATUS_RUNNING_LED` | 是 | 可选，高电平点亮；普通LED需要串联限流电阻 |
-| WS2812状态灯 | GPIO48 | `BSP_PIN_RMT_TX` | 是 | 可选，数据输出连接WS2812的DIN，用于显示设备颜色 |
+| WS2812状态灯 | GPIO48 | `BSP_PIN_RMT_TX` | 是 | 可选，数据输出连接WS2812的DIN；R16V器件需特别检查1.8 V电压域 |
 | 无线串口 RX | GPIO16 | `BSP_PIN_UART_RX` | 是 | UART接收；连接目标设备TX |
 | 无线串口 TX | GPIO17 | `BSP_PIN_UART_TX` | 是 | UART发送；连接目标设备RX |
 | 2.4 GHz天线 | 取决于模组或射频设计 | 无 | 取决于硬件 | 无线模式必须具有板载天线或正确连接的外置天线 |
@@ -274,6 +317,7 @@ id,data,u8,1
 - 三档模式使用的`BSP_PIN_MODESEL`引脚必须支持ADC输入；两档模式只要求数字输入能力。
 - Connected、Running和WS2812引脚必须支持数字输出，其中WS2812输出由RMT外设驱动。
 - 不得选择被Flash、PSRAM、启动配置或其他板载外设占用的引脚，并应确认该引脚已从所用芯片或模组引出。
+- **R16V器件的GPIO47和GPIO48位于1.8 V电压域。** 默认`BSP_PIN_RMT_TX=48`不能直接按普通3.3 V GPIO连接；使用这类模组时应改用兼容引脚，或增加合适的电平转换并确认开发板原理图。
 
 #### 模式选择开关
 
@@ -306,11 +350,11 @@ id,data,u8,1
 
 ## Introduction
 
-AmphiLink is a dual-mode CMSIS-DAP V2 debugger based on the ESP32-S3. It supports wired debugging through the native USB peripheral and wireless debugging over Wi-Fi and TCP, including the native TCP protocol supported by recent OpenOCD versions, with no additional hardware required on the computer. The project currently provides SWD debugging and can be built quickly using a readily available ESP32-S3 N16R8 development board.
+AmphiLink is a dual-mode CMSIS-DAP V2 debugger based on the ESP32-S3. It supports wired debugging through the native USB peripheral and wireless debugging over Wi-Fi and TCP, including the native TCP protocol supported by recent OpenOCD versions, with no additional hardware required on the computer. The project provides SWD debugging and separate no-PSRAM, Quad-PSRAM, and Octal-PSRAM firmware profiles for common official ESP32-S3 modules with at least 2 MiB of flash.
 
 ## Features
 
-- Simple hardware: one commonly available ESP32-S3 N16R8 development board
+- Simple hardware: one commonly available ESP32-S3 development board with at least 2 MiB of flash
 - Convenient connectivity: no additional hardware needs to be connected to the computer
 - High debug speed: the core implementation accesses registers directly to achieve higher debug throughput
 - Complete companion software: the AmphiLink CFG Tool VS Code extension makes the debugger quick and easy to use
@@ -321,7 +365,7 @@ AmphiLink is a dual-mode CMSIS-DAP V2 debugger based on the ESP32-S3. It support
 
 ### Hardware Preparation
 
-A commonly available ESP32-S3 N16R8 development board is sufficient as the main hardware for this project. For a custom board, refer to the [hardware design notes](#hardware-design-notes).
+A commonly available ESP32-S3 development board is sufficient as the main hardware for this project. Select firmware for the module's PSRAM type. For a custom board, refer to the [hardware design notes](#hardware-design-notes).
 
 **Important: wireless mode requires an onboard 2.4 GHz antenna or a connected external 2.4 GHz antenna. Operating without a suitable antenna may cause the chip or module to overheat. If your hardware has no suitable antenna, read the mode-selection section below carefully, as choosing the wrong mode may damage the chip.**
 
@@ -363,6 +407,8 @@ A commonly available ESP32-S3 N16R8 development board is sufficient as the main 
    **If your hardware has no suitable antenna, make sure it cannot enter wireless mode; otherwise, the chip or module may overheat or be damaged. With the default configuration, keep GPIO7 low at all times so that an automatic reset, including one following certain flashing methods, cannot select the wrong mode.**
 
 4. To use custom pins, change [bsp_pin_config.h](components/BSP/inc/bsp_pin_config.h).
+
+   **Important: GPIO47 and GPIO48 are in a 1.8 V power domain on R16V parts.** The default `BSP_PIN_RMT_TX=48` must not be wired as an ordinary 3.3 V GPIO. When using these parts, select a compatible pin or add appropriate level translation after checking the development-board schematic.
 
 ### Connection
 
@@ -444,6 +490,47 @@ The following walkthrough uses the VS Code -> Cortex-Debug -> OpenOCD toolchain 
 
 ## For Developers
 
+### Build Profiles and Module Selection
+
+The project is verified with ESP-IDF 6.0.2. All profiles use the same [2 MiB partition table](partition-2MiB.csv); larger flash devices use only their first 2 MiB. Select a profile from the module marking or datasheet:
+
+| PSRAM hardware | Common module suffix | sdkconfig profile | Build directory |
+| --- | --- | --- | --- |
+| No PSRAM | No `R` capacity suffix | `sdkconfig.no-psram` | `build-no-psram` |
+| Quad PSRAM | `R2` | `sdkconfig.quad-psram` | `build-quad-psram` |
+| Octal PSRAM | `R8`, `R16V` | `sdkconfig.octal-psram` | `build-octal-psram` |
+
+For other naming schemes, use the PSRAM bus type stated in the datasheet. Quad and Octal PSRAM drivers are mutually exclusive compile-time choices and cannot be selected automatically at startup. All three profiles enable ESP-IDF Quad/Octal flash auto-detection: QIO is the baseline mode for Quad flash, while detected Octal flash switches to OPI STR. The Octal PSRAM profile currently uses a conservative 40 MHz setting to provide more timing margin across modules and board-level signal quality; 80 MHz can also be used when the hardware requirements are met. Flash auto-detection does not guarantee advanced features; this project uses only basic access and the first 2 MiB.
+
+Build each profile with a clean, independent generated configuration:
+
+```bash
+idf.py -B build-no-psram \
+  -D SDKCONFIG="$PWD/build-no-psram/sdkconfig" \
+  -D SDKCONFIG_DEFAULTS="$PWD/sdkconfig.no-psram" build
+
+idf.py -B build-quad-psram \
+  -D SDKCONFIG="$PWD/build-quad-psram/sdkconfig" \
+  -D SDKCONFIG_DEFAULTS="$PWD/sdkconfig.quad-psram" build
+
+idf.py -B build-octal-psram \
+  -D SDKCONFIG="$PWD/build-octal-psram/sdkconfig" \
+  -D SDKCONFIG_DEFAULTS="$PWD/sdkconfig.octal-psram" build
+```
+
+Flash with `idf.py -B <matching-build-directory> flash`. A plain `idf.py build` currently selects `sdkconfig.octal-psram` through the top-level `CMakeLists.txt`. To switch the default profile quickly, leave exactly one `set(SDKCONFIG_DEFAULTS ...)` line uncommented in this block:
+
+```cmake
+if(NOT DEFINED SDKCONFIG_DEFAULTS AND "$ENV{SDKCONFIG_DEFAULTS}" STREQUAL "")
+    # choose one of the following sdkconfig files to use as default by uncommenting it and commenting the others
+    set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.octal-psram")
+    # set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.no-psram")
+    # set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.quad-psram")
+endif()
+```
+
+Never reuse another profile's build directory or generated `sdkconfig`. After changing the default, if an old root `sdkconfig` or `build/` exists, back up any custom settings and remove both before running `idf.py build`; ESP-IDF otherwise continues to prioritize the stale configuration. An explicit command-line or environment `SDKCONFIG_DEFAULTS` value takes precedence over this default.
+
 ### Basic Configuration
 
 Several compile-time macros provide quick project customization:
@@ -465,10 +552,10 @@ See the [interface protocol documentation](protocol.md) for the complete UDP dis
 ```text
 main/                              # Entry point and firmware image build configuration
 components/
-├── BSP/                           # ESP32-S3 GPIO, ADC, flash, USB PHY, RMT, and board services
+├── BSP/                           # ESP32-S3 GPIO, ADC, USB PHY, UART, RMT, and board services
 ├── Module/
 │   ├── DAP/                       # CMSIS-DAP core, SWD timing, and hardware adaptation
-│   ├── flash/                     # NVS, FATFS, and SPIFFS storage management
+│   ├── flash/                     # NVS and read-only web FATFS storage management
 │   ├── network/                   # Wi-Fi manager, multi-instance TCP servers, and UDP broadcaster
 │   ├── serial/                    # UART-over-TCP wireless serial bridge
 │   ├── sw3/                       # Two-position/three-position mode input
@@ -526,7 +613,7 @@ The images can be generated and flashed using either of the following methods:
 
 1. Build and flash them with the project
 
-   Place either or both CSV files in the project root and rebuild the project. The build system generates `build/wifi_nvs.bin` and/or `build/identity_nvs.bin` and automatically writes them to the corresponding partitions when `idf.py flash` is run. If a CSV file is absent, its provisioning image is not generated or flashed. If no device identity is provisioned, the firmware uses the default name `AmphiLink` and default ID `1`.
+   Place either or both CSV files in the project root and rebuild the selected profile. The build system generates `wifi_nvs.bin` and/or `identity_nvs.bin` in that profile's build directory and writes them when `idf.py -B <matching-build-directory> flash` is run. If a CSV file is absent, its provisioning image is not generated or flashed. If no device identity is provisioned, the firmware uses the default name `AmphiLink` and default ID `1`.
 
 2. Generate and flash them separately without ESP-IDF
 
@@ -542,7 +629,7 @@ The images can be generated and flashed using either of the following methods:
      identity_nvs.csv identity_nvs.bin 0x3000
    ```
 
-   The generated images can then be flashed separately with a flashing tool that supports explicit flash offsets or another suitable tool. With the current [partition table](partition-16MiB.csv), use the following image parameters:
+   The generated images can then be flashed separately with a flashing tool that supports explicit flash offsets or another suitable tool. With the current [partition table](partition-2MiB.csv), use the following image parameters:
 
    | Image | Partition size | Flash offset |
    | --- | --- | --- |
@@ -566,7 +653,7 @@ The project runs on most common ESP32-S3 development boards. A custom board can 
 | Mode selection | GPIO7 | `BSP_PIN_MODESEL` | Yes | Used only by two-position or three-position selection; forced modes do not use this pin |
 | Connected status LED | GPIO42 | `BSP_PIN_STATUS_CONNECTED_LED` | Yes | Optional and active high; a standard LED requires a series current-limiting resistor |
 | Running status LED | GPIO41 | `BSP_PIN_STATUS_RUNNING_LED` | Yes | Optional and active high; a standard LED requires a series current-limiting resistor |
-| WS2812 status LED | GPIO48 | `BSP_PIN_RMT_TX` | Yes | Optional; connect the data output to WS2812 DIN to display the device color |
+| WS2812 status LED | GPIO48 | `BSP_PIN_RMT_TX` | Yes | Optional; connect to WS2812 DIN; check the 1.8 V domain on R16V parts |
 | Wireless serial RX | GPIO16 | `BSP_PIN_UART_RX` | Yes | UART receive; connect to target TX |
 | Wireless serial TX | GPIO17 | `BSP_PIN_UART_TX` | Yes | UART transmit; connect to target RX |
 | 2.4 GHz antenna | Depends on the module or RF design | None | Hardware-dependent | Wireless mode requires an onboard antenna or a correctly connected external antenna |
@@ -577,6 +664,7 @@ Pins marked as changeable are configured in [bsp_pin_config.h](components/BSP/in
 - `BSP_PIN_MODESEL` must support ADC input in three-position mode; two-position mode requires only digital input capability.
 - The Connected, Running, and WS2812 pins must support digital output; the WS2812 output is driven by the RMT peripheral.
 - Do not select pins occupied by flash, PSRAM, boot configuration, or other onboard peripherals, and verify that the selected chip or module exposes each pin.
+- **GPIO47 and GPIO48 are in a 1.8 V power domain on R16V parts.** The default `BSP_PIN_RMT_TX=48` must not be wired as an ordinary 3.3 V GPIO on these modules. Select a compatible pin or add appropriate level translation after checking the development-board schematic.
 
 #### Mode-Selection Switch
 

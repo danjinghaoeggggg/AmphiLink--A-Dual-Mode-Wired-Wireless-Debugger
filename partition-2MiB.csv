@@ -1,0 +1,6 @@
+# Name,          Type, SubType, Offset,   Size,      Flags
+nvs,             data, nvs,     0x9000,   0x6000,
+wifi_nvs,        data, nvs,     0xF000,   0xB000,
+identity_nvs,    data, nvs,     0x1A000,  0x3000,
+factory,         app,  factory, 0x20000,  0x1C0000,
+webpage_vfs,     data, fat,     0x1E0000, 0x19000,   readonly
