@@ -4,7 +4,7 @@
 
 ## 简介
 
-AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过原生USB进行有线调试，也支持通过Wi-Fi和TCP进行无线调试（支持通过较新版本OpenOCD原生TCP协议驱动，电脑端无需额外硬件）。目前项目提供SWD调试，并提供无PSRAM、Quad PSRAM和Octal PSRAM三套固件配置，可覆盖Flash容量不小于2 MiB的常见ESP32-S3官方模组。
+AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过原生USB进行有线调试，也支持通过Wi-Fi和TCP进行无线调试（支持通过较新版本OpenOCD原生TCP协议驱动，电脑端无需额外硬件）。目前项目提供SWD和JTAG调试，并提供无PSRAM、Quad PSRAM和Octal PSRAM三套固件配置，可覆盖Flash容量不小于2 MiB的常见ESP32-S3官方模组。
 
 ## 特点
 
@@ -26,18 +26,21 @@ AmphiLink是一款基于ESP32-S3的双模式CMSIS-DAP V2调试器，支持通过
 
    本工程是标准的ESP-IDF工程，可以使用ESP-IDF工具构建或烧录。当然，也可根据Release中的指南直接烧录已经构建好的固件。
 
-2. 参照下表完成主要的SWD调试引脚和无线串口引脚（如需）连接
+2. 参照下表完成主要的SWD/JTAG调试引脚和无线串口引脚（如需）连接
 
    | AmphiLink引脚 | 目标设备引脚 | 说明 |
    | --- | --- | --- |
-   | GPIO4 | SWCLK | SWD时钟 |
-   | GPIO5 | SWDIO | SWD双向数据 |
-   | GPIO6 | nRESET | 可选的目标复位信号 |
+   | GPIO4 | SWCLK / TCK | SWD/JTAG时钟 |
+   | GPIO5 | SWDIO / TMS | SWD双向数据或JTAG模式选择 |
+   | GPIO6 | nRESET (SRST) | 可选的目标系统复位信号 |
+   | GPIO8 | TDI | JTAG数据输出 |
+   | GPIO9 | TDO | JTAG数据输入 |
+   | GPIO10 | nTRST | JTAG TAP复位，独立于nRESET |
    | GPIO16 | UART RX | 无线串口接收，连接目标设备 TX |
    | GPIO17 | UART TX | 无线串口发送，连接目标设备 RX |
    | GND | GND | 必须共地 |
 
-   调试信号使用3.3 V逻辑电平。
+   调试信号使用3.3 V逻辑电平，必须与目标设备共地。
 
 3. 模式选择
 
@@ -231,7 +234,7 @@ web/                               # 构建到webpage_vfs分区的配置网页�
 
 本项目保留了Arm CMSIS-DAP的命令处理核心，并针对ESP32-S3和双传输架构完成了以下适配：
 
-- 在[DAP_config.h](components/Module/DAP/inc/DAP_config.h)中配置SWD能力、包大小、设备信息和板级回调；当前未声明JTAG、SWO或DAP UART能力。
+- 在[DAP_config.h](components/Module/DAP/inc/DAP_config.h)中配置SWD能力、包大小、设备信息和板级回调；当前声明SWD和JTAG能力，未声明SWO或DAP UART能力。
 - 在[dap_port.h](components/Module/DAP/inc/dap_port.h)和[dap_port.c](components/Module/DAP/src/dap_port.c)中实现ESP32-S3的SWCLK、SWDIO、nRESET、时间戳和状态灯适配。SWD时序关键路径直接访问GPIO和IO_MUX寄存器以降低延迟和抖动。
 - 在DAP核心外增加基于FreeRTOS的请求/响应队列，支持8包缓冲、`DAP_QueueCommands`/`DAP_ExecuteCommands`以及即时`DAP_TransferAbort`。
 - 将传输层与命令执行层分离，USB直接承载CMSIS-DAP包，TCP则增加与OpenOCD CMSIS-DAP TCP backend兼容的8字节帧头。
@@ -300,9 +303,12 @@ id,data,u8,1
 | 信号或功能 | 默认引脚 | 对应配置宏 | 是否可更改 | 硬件说明 |
 | --- | --- | --- | --- | --- |
 | USB D- / D+ | GPIO19 / GPIO20 | 无 | 否 | ESP32-S3内部USB PHY的固定引脚；有线模式必须使用原生USB接口，不能使用USB转串口接口代替 |
-| SWCLK | GPIO4 | `BSP_PIN_DEBUG_CLOCK` | 是 | SWD时钟，必须连接目标设备 |
-| SWDIO | GPIO5 | `BSP_PIN_DEBUG_DATA` | 是 | SWD双向数据，必须连接目标设备 |
-| nRESET | GPIO6 | `BSP_PIN_TARGET_RESET` | 是 | 目标复位信号，可选 |
+| SWCLK / TCK | GPIO4 | `BSP_PIN_DEBUG_CLOCK` | 是 | SWD/JTAG时钟 |
+| SWDIO / TMS | GPIO5 | `BSP_PIN_DEBUG_DATA` | 是 | SWD双向数据 / JTAG模式选择 |
+| nRESET (SRST) | GPIO6 | `BSP_PIN_TARGET_RESET` | 是 | 目标系统复位，开漏，可选 |
+| TDI | GPIO8 | `BSP_PIN_JTAG_TDI` | 是 | JTAG数据输出 |
+| TDO | GPIO9 | `BSP_PIN_JTAG_TDO` | 是 | JTAG数据输入 |
+| nTRST | GPIO10 | `BSP_PIN_JTAG_TRST` | 是 | JTAG TAP复位，开漏，与nRESET独立 |
 | 模式选择 | GPIO7 | `BSP_PIN_MODESEL` | 是 | 仅两档或三档选择模式需要；强制模式不使用该引脚 |
 | Connected状态灯 | GPIO42 | `BSP_PIN_STATUS_CONNECTED_LED` | 是 | 可选，高电平点亮；普通LED需要串联限流电阻 |
 | Running状态灯 | GPIO41 | `BSP_PIN_STATUS_RUNNING_LED` | 是 | 可选，高电平点亮；普通LED需要串联限流电阻 |
@@ -313,7 +319,7 @@ id,data,u8,1
 
 表中标记为可更改的引脚统一在[bsp_pin_config.h](components/BSP/inc/bsp_pin_config.h)中配置，修改后需要重新编译和烧录固件。GND必须与目标设备共地，不属于可配置信号。重映射引脚时还应满足以下要求：
 
-- SWCLK、SWDIO和nRESET必须使用GPIO32以下的引脚，这是当前快速GPIO实现的限制。
+- SWCLK/TCK、SWDIO/TMS、TDI、TDO、nTRST和nRESET必须使用GPIO32以下的引脚，这是当前快速GPIO实现的限制。
 - 三档模式使用的`BSP_PIN_MODESEL`引脚必须支持ADC输入；两档模式只要求数字输入能力。
 - Connected、Running和WS2812引脚必须支持数字输出，其中WS2812输出由RMT外设驱动。
 - 不得选择被Flash、PSRAM、启动配置或其他板载外设占用的引脚，并应确认该引脚已从所用芯片或模组引出。
@@ -350,7 +356,7 @@ id,data,u8,1
 
 ## Introduction
 
-AmphiLink is a dual-mode CMSIS-DAP V2 debugger based on the ESP32-S3. It supports wired debugging through the native USB peripheral and wireless debugging over Wi-Fi and TCP, including the native TCP protocol supported by recent OpenOCD versions, with no additional hardware required on the computer. The project provides SWD debugging and separate no-PSRAM, Quad-PSRAM, and Octal-PSRAM firmware profiles for common official ESP32-S3 modules with at least 2 MiB of flash.
+AmphiLink is a dual-mode CMSIS-DAP V2 debugger based on the ESP32-S3. It supports wired debugging through the native USB peripheral and wireless debugging over Wi-Fi and TCP, including the native TCP protocol supported by recent OpenOCD versions, with no additional hardware required on the computer. The project provides SWD and JTAG debugging (JTAG target-side debugging is pending hardware validation) and separate no-PSRAM, Quad-PSRAM, and Octal-PSRAM firmware profiles for common official ESP32-S3 modules with at least 2 MiB of flash.
 
 ## Features
 
@@ -373,18 +379,21 @@ A commonly available ESP32-S3 development board is sufficient as the main hardwa
 
    This is a standard ESP-IDF project and can be built and flashed with the ESP-IDF tools. Alternatively, follow the instructions in the release to flash a prebuilt firmware image.
 
-2. Connect the main SWD and wireless serial signals (as needed) as shown below
+2. Connect the main SWD/JTAG and wireless serial signals (as needed) as shown below
 
    | AmphiLink pin | Target pin | Description |
    | --- | --- | --- |
-   | GPIO4 | SWCLK | SWD clock |
-   | GPIO5 | SWDIO | Bidirectional SWD data |
-   | GPIO6 | nRESET | Optional target reset signal |
+   | GPIO4 | SWCLK / TCK | SWD/JTAG clock |
+   | GPIO5 | SWDIO / TMS | SWD data / JTAG mode selection |
+   | GPIO6 | nRESET (SRST) | Optional target system reset |
+   | GPIO8 | TDI | JTAG data output |
+   | GPIO9 | TDO | JTAG data input |
+   | GPIO10 | nTRST | JTAG TAP reset, independent of nRESET |
    | GPIO16 | UART RX | Wireless serial receive; connect to target TX |
    | GPIO17 | UART TX | Wireless serial transmit; connect to target RX |
    | GND | GND | A common ground is required |
 
-   The debug signals use 3.3 V logic levels.
+   The debug signals use 3.3 V logic levels and require a shared ground; use level shifting with other target voltages. Confirm that GPIO8/9/10 are exposed and unused on your board. nTRST and nRESET are separate open-drain signals and must not be tied together.
 
 3. Select the mode
 
@@ -447,6 +456,8 @@ Wireless serial is enabled by default with `115200 8N1`. AmphiLink CFG Tool auto
 The exact procedure depends on the debug toolchain.
 
 In wired mode, the device can be used as a CMSIS-DAP V2 debugger. Most toolchains that support standard CMSIS-DAP V2, including Keil's debugger and OpenOCD, can use it. In wireless mode, the debugger supports the TCP transport in the CMSIS-DAP driver included in recent OpenOCD versions.
+
+For JTAG (including non-ARM targets), select `interface/cmsis-dap.cfg` for USB or `interface/cmsis-dap-tcp.cfg` plus `cmsis-dap tcp host <device-IP>` for Wi-Fi. Before loading the target configuration, use `transport select jtag` and `adapter speed 100` (kHz); increase to `500` or higher after verifying stability. Select the target configuration and `reset_config` appropriate for your target (nTRST=TRST and nRESET=SRST are separate wires). USB and TCP share the same CMSIS-DAP commands. **There is currently no target board available; full JTAG scanning and halt/resume have not been validated on hardware.**
 
 The following walkthrough uses the VS Code -> Cortex-Debug -> OpenOCD toolchain and includes one-time environment setup.
 
@@ -578,7 +589,7 @@ However, the three-layer dependency structure is not completely strict in this p
 
 The project retains the Arm CMSIS-DAP command core and adds the following adaptations for the ESP32-S3 and dual-transport architecture:
 
-- [DAP_config.h](components/Module/DAP/inc/DAP_config.h) defines SWD capabilities, packet size, device information, and board callbacks. JTAG, SWO, and DAP UART capabilities are not currently advertised.
+- [DAP_config.h](components/Module/DAP/inc/DAP_config.h) defines SWD capabilities, packet size, device information, and board callbacks. SWD and JTAG capabilities are advertised; SWO and DAP UART capabilities are not.
 - [dap_port.h](components/Module/DAP/inc/dap_port.h) and [dap_port.c](components/Module/DAP/src/dap_port.c) implement the ESP32-S3 SWCLK, SWDIO, nRESET, timestamp, and status-LED integration. Timing-critical SWD paths access GPIO and IO_MUX registers directly to reduce latency and jitter.
 - A FreeRTOS request/response queue surrounds the DAP core, providing eight-packet buffering, `DAP_QueueCommands`/`DAP_ExecuteCommands`, and immediate `DAP_TransferAbort` handling.
 - The transport layer is separated from command execution. USB carries CMSIS-DAP packets directly, while TCP adds the 8-byte framing header expected by the OpenOCD CMSIS-DAP TCP backend.
@@ -647,9 +658,12 @@ The project runs on most common ESP32-S3 development boards. A custom board can 
 | Signal or function | Default pin | Configuration macro | Changeable | Hardware notes |
 | --- | --- | --- | --- | --- |
 | USB D- / D+ | GPIO19 / GPIO20 | None | No | Fixed pins of the ESP32-S3 internal USB PHY; wired mode must use the native USB interface and cannot use a USB-to-serial bridge as a substitute |
-| SWCLK | GPIO4 | `BSP_PIN_DEBUG_CLOCK` | Yes | SWD clock; must be connected to the target |
-| SWDIO | GPIO5 | `BSP_PIN_DEBUG_DATA` | Yes | Bidirectional SWD data; must be connected to the target |
-| nRESET | GPIO6 | `BSP_PIN_TARGET_RESET` | Yes | Optional target reset signal |
+| SWCLK / TCK | GPIO4 | `BSP_PIN_DEBUG_CLOCK` | Yes | SWD/JTAG clock |
+| SWDIO / TMS | GPIO5 | `BSP_PIN_DEBUG_DATA` | Yes | SWD data / JTAG mode selection |
+| nRESET (SRST) | GPIO6 | `BSP_PIN_TARGET_RESET` | Yes | Optional open-drain target system reset |
+| TDI | GPIO8 | `BSP_PIN_JTAG_TDI` | Yes | JTAG data output |
+| TDO | GPIO9 | `BSP_PIN_JTAG_TDO` | Yes | JTAG data input |
+| nTRST | GPIO10 | `BSP_PIN_JTAG_TRST` | Yes | Open-drain JTAG TAP reset, separate from nRESET |
 | Mode selection | GPIO7 | `BSP_PIN_MODESEL` | Yes | Used only by two-position or three-position selection; forced modes do not use this pin |
 | Connected status LED | GPIO42 | `BSP_PIN_STATUS_CONNECTED_LED` | Yes | Optional and active high; a standard LED requires a series current-limiting resistor |
 | Running status LED | GPIO41 | `BSP_PIN_STATUS_RUNNING_LED` | Yes | Optional and active high; a standard LED requires a series current-limiting resistor |
@@ -660,7 +674,7 @@ The project runs on most common ESP32-S3 development boards. A custom board can 
 
 Pins marked as changeable are configured in [bsp_pin_config.h](components/BSP/inc/bsp_pin_config.h). Rebuild and flash the firmware after changing them. GND must be shared with the target and is not a configurable signal. Remapped pins must also meet these requirements:
 
-- SWCLK, SWDIO, and nRESET must use pins below GPIO32 because of the current fast GPIO implementation.
+- SWCLK/TCK, SWDIO/TMS, TDI, TDO, nTRST, and nRESET must use pins below GPIO32 because of the current fast GPIO implementation.
 - `BSP_PIN_MODESEL` must support ADC input in three-position mode; two-position mode requires only digital input capability.
 - The Connected, Running, and WS2812 pins must support digital output; the WS2812 output is driven by the RMT peripheral.
 - Do not select pins occupied by flash, PSRAM, boot configuration, or other onboard peripherals, and verify that the selected chip or module exposes each pin.

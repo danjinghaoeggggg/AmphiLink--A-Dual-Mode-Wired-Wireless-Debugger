@@ -82,6 +82,8 @@ TCP 是字节流协议。一个帧可以被拆分到多次发送中，多个帧�
 
 固件支持最多 8 个 CMSIS-DAP 包的内部队列，并支持标准 `DAP_QueueCommands`、`DAP_ExecuteCommands` 和 `DAP_TransferAbort` 语义。队列容量是固件实现细节，客户端仍应进行合理的流量控制，并及时读取响应。
 
+`DAP_Info(Capabilities)` 声明 SWD（bit 0）和 JTAG（bit 1）。`DAP_Connect` 可选择 SWD（`0x01`）或 JTAG（`0x02`），默认仍为 SWD；通用 JTAG 使用 `DAP_JTAG_Sequence`。USB 和 TCP 使用同一命令核心，TCP 帧格式无变化。JTAG 接线为 GPIO4=TCK、GPIO5=TMS、GPIO8=TDI、GPIO9=TDO、GPIO10=nTRST（TAP复位）、GPIO6=nRESET（目标系统复位）；两根复位信号分别为开漏并相互独立。必须共地、使用兼容的3.3 V电平；默认时钟 10 MHz 可由 `DAP_SWJ_Clock` 覆盖，建议 JTAG 初次连接先设 100-500 kHz。JTAG 目标侧完整调试目前尚未实板验证。
+
 ### 无线串口接口
 
 Wi-Fi STA 连接后，设备在 TCP `4443` 提供独立的 UART-over-TCP 服务。该服务不使用 CMSIS-DAP 命令或帧头，连接建立后双方直接交换原始字节流；同一时间只接受一个客户端。TCP 客户端发送的数据写入 UART TX（GPIO17），UART RX（GPIO16）收到的数据发送给客户端；没有客户端时接收数据直接丢弃。Wi-Fi 断开、进入配置热点或串口服务被禁用时，客户端会被断开。硬件流控固定为 `none`，默认配置为 `115200 8N1`。
@@ -414,6 +416,8 @@ The device validates requests according to the following rules:
 If any condition is not met, the current connection is closed without a protocol-level error frame. Clients must not insert padding bytes between TCP frames or send CMSIS-DAP payloads larger than 64 bytes.
 
 The firmware provides an internal queue for up to eight CMSIS-DAP packets and implements the standard `DAP_QueueCommands`, `DAP_ExecuteCommands`, and `DAP_TransferAbort` semantics. Queue capacity is a firmware implementation detail; clients should still apply reasonable flow control and read responses promptly.
+
+`DAP_Info(Capabilities)` advertises SWD (bit 0) and JTAG (bit 1). `DAP_Connect` selects SWD (`0x01`) or JTAG (`0x02`), with SWD remaining the default; generic JTAG scanning uses `DAP_JTAG_Sequence`. USB and TCP use the same command core and TCP framing is unchanged. JTAG pins: GPIO4=TCK, GPIO5=TMS, GPIO8=TDI, GPIO9=TDO, GPIO10=nTRST (TAP reset), and GPIO6=nRESET (target system reset). Both reset signals are independent open-drain outputs. Share ground and use compatible 3.3 V levels. The shared 10 MHz default clock can be overridden by `DAP_SWJ_Clock`; start JTAG at 100-500 kHz. End-to-end JTAG target debugging has not yet been validated on hardware.
 
 ### Wireless Serial Interface
 

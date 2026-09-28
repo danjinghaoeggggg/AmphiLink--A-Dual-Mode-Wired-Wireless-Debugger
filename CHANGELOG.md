@@ -2,6 +2,13 @@
 
 本文件记录 AmphiLink 的重要功能和行为变更。
 
+## 2.1.0
+
+- 新增 CMSIS-DAP JTAG GPIO 寄存器直连实现，经 USB 和 OpenOCD CMSIS-DAP TCP 后端共用；保持现有 SWD 默认接口与时钟配置。
+- 默认引脚：GPIO4=TCK、GPIO5=TMS、GPIO8=TDI、GPIO9=TDO、GPIO10=nTRST、GPIO6=nRESET；TRST/SRST 独立控制。
+- 提供通用 JTAG 序列与 ARM JTAG-DP 命令；当前无目标板，完整扫描链与目标调试仍待实板验证。
+- 项目/产品固件版本更新为 2.1.0（CMSIS-DAP 协议固件版本号保持上游版本）。
+
 ## 2.0.0 - 2026-09-14
 
 **以下内容为相对于 1.0.0 版本的主要变化。**

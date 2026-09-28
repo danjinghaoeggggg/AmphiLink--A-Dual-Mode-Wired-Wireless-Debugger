@@ -12,7 +12,8 @@ static void dap_port_configure_gpio(uint32_t pin, bool input_enabled, bool outpu
     /*
      * DAP owns these pins, so configure IO_MUX and GPIO registers here instead
      * of going through BSP or GPIO LL wrappers. Set the output latch before
-     * enabling the driver to avoid a transient on SWCLK, SWDIO, or nRESET.
+     * enabling the driver to avoid a transient on SWCLK, SWDIO, TDI,
+     * nTRST, or nRESET.
      */
     PIN_FUNC_SELECT(io_mux_reg, PIN_FUNC_GPIO);
     dap_port_gpio_write(pin, initial_level);
@@ -43,13 +44,27 @@ void dap_port_setup(void)
                             false, false, 0U);
     PIN_SET_DRV(DAP_PORT_IO_MUX_REG(BSP_PIN_DEBUG_CLOCK), 0U);
     PIN_SET_DRV(DAP_PORT_IO_MUX_REG(BSP_PIN_DEBUG_DATA), 0U);
+    PIN_SET_DRV(DAP_PORT_IO_MUX_REG(BSP_PIN_JTAG_TDI), 0U);
     dap_port_off();
 }
 
 void dap_port_swd_setup(void)
 {
+    dap_port_configure_gpio(BSP_PIN_JTAG_TDI, true, false, false, false, 1U);
+    dap_port_configure_gpio(BSP_PIN_JTAG_TDO, true, false, false, false, 1U);
+    dap_port_configure_gpio(BSP_PIN_JTAG_TRST, true, true, true, true, 1U);
     dap_port_configure_gpio(BSP_PIN_DEBUG_CLOCK, true, true, false, false, 1U);
     dap_port_configure_gpio(BSP_PIN_DEBUG_DATA, true, true, false, false, 1U);
+    dap_port_configure_gpio(BSP_PIN_TARGET_RESET, true, true, true, true, 1U);
+}
+
+void dap_port_jtag_setup(void)
+{
+    dap_port_configure_gpio(BSP_PIN_DEBUG_CLOCK, true, true, false, false, 1U);
+    dap_port_configure_gpio(BSP_PIN_DEBUG_DATA, true, true, false, false, 1U);
+    dap_port_configure_gpio(BSP_PIN_JTAG_TDI, true, true, false, false, 1U);
+    dap_port_configure_gpio(BSP_PIN_JTAG_TDO, true, false, false, false, 1U);
+    dap_port_configure_gpio(BSP_PIN_JTAG_TRST, true, true, true, true, 1U);
     dap_port_configure_gpio(BSP_PIN_TARGET_RESET, true, true, true, true, 1U);
 }
 
@@ -57,6 +72,9 @@ void dap_port_off(void)
 {
     dap_port_configure_gpio(BSP_PIN_DEBUG_CLOCK, true, false, false, false, 1U);
     dap_port_configure_gpio(BSP_PIN_DEBUG_DATA, true, false, false, false, 1U);
+    dap_port_configure_gpio(BSP_PIN_JTAG_TDI, true, false, false, false, 1U);
+    dap_port_configure_gpio(BSP_PIN_JTAG_TDO, true, false, false, false, 1U);
+    dap_port_configure_gpio(BSP_PIN_JTAG_TRST, true, true, true, true, 1U);
     dap_port_configure_gpio(BSP_PIN_TARGET_RESET, true, true, true, true, 1U);
 }
 

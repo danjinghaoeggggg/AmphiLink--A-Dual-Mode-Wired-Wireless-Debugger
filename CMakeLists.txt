@@ -10,7 +10,7 @@ set(COMPONENT_DIRS
     "${CMAKE_CURRENT_LIST_DIR}/components/APP"
 )
 
-set(PROJECT_VER "2.0.0")
+set(PROJECT_VER "2.1.0")
 
 if(NOT DEFINED SDKCONFIG_DEFAULTS AND "$ENV{SDKCONFIG_DEFAULTS}" STREQUAL "")
     # choose one of the following sdkconfig files to use as default by uncommenting it and commenting the others

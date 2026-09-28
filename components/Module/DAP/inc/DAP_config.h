@@ -143,7 +143,7 @@ This information includes:
 
 /// Indicate that JTAG communication mode is available at the Debug Port.
 /// This information is returned by the command \ref DAP_Info as part of <b>Capabilities</b>.
-#define DAP_JTAG                0               ///< JTAG Mode: 1 = available, 0 = not available.
+#define DAP_JTAG                1               ///< JTAG Mode: 1 = available, 0 = not available.
 
 /// Configure maximum number of JTAG devices on the scan chain connected to the Debug Access Port.
 /// This setting impacts the RAM requirements of the Debug Unit. Valid range is 1 .. 255.
@@ -334,7 +334,7 @@ static inline uint8_t DAP_GetTargetBoardNameString (char *str) {
 \return String length (including terminating NULL character) or 0 (no string).
 */
 static inline uint8_t DAP_GetProductFirmwareVersionString (char *str) {
-  const char *ver = "v0.0.0";
+  const char *ver = "v2.1.0";
   strcpy(str, ver);
   return (uint8_t)(strlen(ver) + 1U);
 }
@@ -384,7 +384,7 @@ Configures the DAP Hardware I/O pins for JTAG mode:
  - TDO to input mode.
 */
 static inline void PORT_JTAG_SETUP (void) {
-  ;
+  dap_port_jtag_setup();
 }
 
 /** Setup SWD I/O pins: SWCLK, SWDIO, and nRESET.
@@ -489,14 +489,14 @@ static inline __attribute__((always_inline)) void     PIN_SWDIO_OUT_DISABLE (voi
 \return Current status of the TDI DAP hardware I/O pin.
 */
 static inline __attribute__((always_inline)) uint32_t PIN_TDI_IN  (void) {
-  return (0U);
+  return dap_port_jtag_tdi_read();
 }
 
 /** TDI I/O pin: Set Output.
 \param bit Output value for the TDI DAP hardware I/O pin.
 */
 static inline __attribute__((always_inline)) void     PIN_TDI_OUT (uint32_t bit) {
-  ;
+  dap_port_jtag_tdi_write(bit);
 }
 
 
@@ -506,7 +506,7 @@ static inline __attribute__((always_inline)) void     PIN_TDI_OUT (uint32_t bit)
 \return Current status of the TDO DAP hardware I/O pin.
 */
 static inline __attribute__((always_inline)) uint32_t PIN_TDO_IN  (void) {
-  return (0U);
+  return dap_port_jtag_tdo_read();
 }
 
 
@@ -516,7 +516,7 @@ static inline __attribute__((always_inline)) uint32_t PIN_TDO_IN  (void) {
 \return Current status of the nTRST DAP hardware I/O pin.
 */
 static inline __attribute__((always_inline)) uint32_t PIN_nTRST_IN   (void) {
-  return (0U);
+  return dap_port_jtag_trst_read();
 }
 
 /** nTRST I/O pin: Set Output.
@@ -525,7 +525,7 @@ static inline __attribute__((always_inline)) uint32_t PIN_nTRST_IN   (void) {
            - 1: release JTAG TRST Test Reset.
 */
 static inline __attribute__((always_inline)) void     PIN_nTRST_OUT  (uint32_t bit) {
-  ;
+  dap_port_jtag_trst_write(bit);
 }
 
 // nRESET Pin I/O------------------------------------------

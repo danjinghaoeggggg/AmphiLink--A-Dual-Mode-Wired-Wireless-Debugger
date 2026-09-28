@@ -14,26 +14,31 @@
 #endif
 
 #if (BSP_PIN_DEBUG_CLOCK >= 32U) || (BSP_PIN_DEBUG_DATA >= 32U) || \
-    (BSP_PIN_TARGET_RESET >= 32U)
-#error "The DAP SWD GPIO fast path requires SWD and reset pins below GPIO32"
+    (BSP_PIN_TARGET_RESET >= 32U) || (BSP_PIN_JTAG_TDI >= 32U) || \
+    (BSP_PIN_JTAG_TDO >= 32U) || (BSP_PIN_JTAG_TRST >= 32U)
+#error "The DAP SWD/JTAG GPIO fast path requires debug and reset pins below GPIO32"
 #endif
 
 /*
  * DAP owns these signals and accesses the ESP32-S3 GPIO peripheral directly.
  * This deliberately bypasses the general BSP GPIO API so the per-bit SWD path
  * has a short, predictable instruction sequence. SWDIO input remains enabled;
- * turnaround only changes its output-enable bit. BSP remains responsible for
+ * turnaround only changes its output-enable bit. JTAG uses the same fast GPIO
+ * bank for TDI/TDO/nTRST. BSP remains responsible for
  * board pin assignment and system services, not DAP signal manipulation.
  */
 #define DAP_PORT_DEBUG_CLOCK_MASK (1U << BSP_PIN_DEBUG_CLOCK)
 #define DAP_PORT_DEBUG_DATA_MASK  (1U << BSP_PIN_DEBUG_DATA)
 #define DAP_PORT_TARGET_RESET_MASK (1U << BSP_PIN_TARGET_RESET)
+#define DAP_PORT_JTAG_TDI_MASK     (1U << BSP_PIN_JTAG_TDI)
+#define DAP_PORT_JTAG_TRST_MASK    (1U << BSP_PIN_JTAG_TRST)
 #define DAP_PORT_CPU_CLOCK_HZ       BSP_SYSTEM_CPU_CLOCK_HZ
 #define DAP_PORT_GPIO_WRITE_CYCLES  2U
 #define DAP_PORT_TIMESTAMP_CLOCK_HZ BSP_SYSTEM_TIMESTAMP_CLOCK_HZ
 
 void dap_port_setup(void);
 void dap_port_swd_setup(void);
+void dap_port_jtag_setup(void);
 void dap_port_off(void);
 uint8_t dap_port_reset_target(void);
 
@@ -117,6 +122,40 @@ static inline __attribute__((always_inline)) void dap_port_debug_data_set_output
         GPIO.enable_w1ts = DAP_PORT_DEBUG_DATA_MASK;
     } else {
         GPIO.enable_w1tc = DAP_PORT_DEBUG_DATA_MASK;
+    }
+}
+
+static inline __attribute__((always_inline)) uint32_t dap_port_jtag_tdi_read(void)
+{
+    return (GPIO.in >> BSP_PIN_JTAG_TDI) & 1U;
+}
+
+static inline __attribute__((always_inline)) void dap_port_jtag_tdi_write(uint32_t level)
+{
+    if ((level & 1U) != 0U) {
+        GPIO.out_w1ts = DAP_PORT_JTAG_TDI_MASK;
+    } else {
+        GPIO.out_w1tc = DAP_PORT_JTAG_TDI_MASK;
+    }
+}
+
+static inline __attribute__((always_inline)) uint32_t dap_port_jtag_tdo_read(void)
+{
+    return (GPIO.in >> BSP_PIN_JTAG_TDO) & 1U;
+}
+
+static inline __attribute__((always_inline)) uint32_t dap_port_jtag_trst_read(void)
+{
+    return (GPIO.in >> BSP_PIN_JTAG_TRST) & 1U;
+}
+
+static inline __attribute__((always_inline)) void dap_port_jtag_trst_write(uint32_t level)
+{
+    /* The nTRST pad is open-drain: high releases the line. */
+    if ((level & 1U) != 0U) {
+        GPIO.out_w1ts = DAP_PORT_JTAG_TRST_MASK;
+    } else {
+        GPIO.out_w1tc = DAP_PORT_JTAG_TRST_MASK;
     }
 }
 
